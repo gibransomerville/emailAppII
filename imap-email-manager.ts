@@ -197,15 +197,12 @@ export class IMAPEmailManager {
   }
 
   /**
-   * Main email loading orchestrator
+   * Main email loading orchestrator (Strictly Linear for each email)
    */
   async loadEmails(): Promise<EmailLoadingResult> {
     console.log('IMAPEmailManager: loadEmails called, googleAuth:', !!this.googleAuth);
-    
     const startTime = Date.now();
-    
     this.uiThemeManager.showLoading(true);
-    
     try {
       // Ensure we have a conversation select callback
       if (!this.conversationSelectCallback) {
@@ -214,74 +211,60 @@ export class IMAPEmailManager {
           this.eventManager.selectConversation(conversationId);
         });
       }
-
       // Test mailparser functionality on first load
       const emailParsingConfig = (window as any).EMAIL_PARSING_CONFIG;
       if (emailParsingConfig?.useMailparser) {
         console.log('Testing mailparser functionality...');
-        
         let mailparserWorking = false;
-        
         if (this.emailManager.testMailparserFunctionality) {
           mailparserWorking = await this.emailManager.testMailparserFunctionality();
         } else {
           console.warn('testMailparserFunctionality not available, skipping test');
           mailparserWorking = true; // Assume it works to avoid blocking
         }
-        
         if (!mailparserWorking && !emailParsingConfig.fallbackToManual) {
           throw new Error('Mailparser is not working and fallback is disabled');
         }
       }
-      
-      // If Google SSO is active, use Gmail API
-      if (this.googleAuth) {
-        console.log('Using Gmail API for email loading');
-        await this.loadGmailEmails();
-      } else if (this.emailConfig) {
-        console.log('Using IMAP for email loading');
-        const imapEmails = await this.fetchEmailsFromImap();
-        this.emails = imapEmails;
-      } else {
-        this.uiThemeManager.showNotification('Please configure your email settings first or use Google SSO', 'warning');
-        this.uiThemeManager.showSettingsModal();
-        return {
-          success: false,
-          emails: [],
-          conversations: {},
-          error: 'No email configuration available'
-        };
-      }
-
-      // Group emails into conversations
+      // --- Strictly Linear Email Processing ---
+      const rawEmails = await this.fetchAllRawEmails();
+      // 1. Standardize each raw email
+      const standardizedEmails = rawEmails.map((raw: any) =>
+        this.emailManager.standardizeEmailObject(raw, this.googleAuth ? 'gmail-api' : 'imap')
+      );
+      // 2. Process HTML/Text for each standardized email
+      const htmlEngine = (window as any).EmailHtmlEngine || (globalThis as any).EmailHtmlEngine;
+      this.emails = standardizedEmails.map((email: any) => {
+        if (htmlEngine && typeof htmlEngine.processEmailHtml === 'function') {
+          const processed = htmlEngine.processEmailHtml(email);
+          // Store processed HTML for direct use in UI
+          email.processedHtml = processed.content;
+        }
+        return email;
+      });
+      // 3. Group emails into conversations
       console.log('Grouping emails into conversations...');
       this.conversations = this.basicEmailGrouping(this.emails);
-      
-      // *** CRITICAL: Sync state immediately to prevent race conditions ***
+      // 4. Sync state immediately to prevent race conditions
       this.syncGlobalState();
-      
-      // Build search index using the singleton search manager
+      // 5. Build search index using the singleton search manager
       const searchManager = getSearchManager();
       if (searchManager && searchManager.buildSearchIndex) {
         searchManager.buildSearchIndex(this.emails);
       }
-      
-      // Initialize IMAP search engine if using IMAP
+      // 6. Initialize IMAP search engine if using IMAP
       if (this.emailConfig && !this.googleAuth && (window as any).IMAPSearchEngine) {
         (window as any).imapSearchEngine = new (window as any).IMAPSearchEngine(this.emailConfig);
       }
-      
-      // Log parsing statistics
+      // 7. Log parsing statistics
       if (this.emails.length > 0) {
         this.emailManager.logEmailParsingStats(this.emails);
       }
-      
-      // Debug email rendering issues
+      // 8. Debug email rendering issues
       if (typeof (window as any).debugEmailRenderingIssues === 'function') {
         (window as any).debugEmailRenderingIssues();
       }
-      
-      // Ensure conversations list exists before rendering
+      // 9. Ensure conversations list exists before rendering
       const conversationsList = document.getElementById('conversations-list');
       if (!conversationsList) {
         console.error('Conversations list element not found, delaying render');
@@ -289,14 +272,11 @@ export class IMAPEmailManager {
       } else {
         this.renderConversationsList();
       }
-      
       const loadingTime = Date.now() - startTime;
-      
       this.uiThemeManager.showNotification(
         `Loaded ${this.emails.length} messages in ${Object.keys(this.conversations).length} conversations`,
         'success'
       );
-      
       return {
         success: true,
         emails: this.emails,
@@ -307,13 +287,10 @@ export class IMAPEmailManager {
           loadingTime
         }
       };
-      
     } catch (error) {
       console.error('Error loading emails:', error);
-      
       const errorMessage = (error as Error).message;
       let userMessage = 'Failed to load emails';
-      
       if (errorMessage.includes('Application-specific password required')) {
         userMessage = 'Gmail requires an app-specific password for IMAP access';
       } else if (errorMessage.includes('Invalid credentials')) {
@@ -323,9 +300,7 @@ export class IMAPEmailManager {
       } else if (errorMessage.includes('OAuth')) {
         userMessage = 'Google authentication failed';
       }
-      
       this.uiThemeManager.showNotification(userMessage, 'error');
-      
       return {
         success: false,
         emails: [],
@@ -338,115 +313,67 @@ export class IMAPEmailManager {
   }
 
   /**
-   * Fetch emails from IMAP server
-   * @returns Promise resolving to array of parsed emails
+   * Unified fetch for all raw emails (Gmail, IMAP, etc.)
+   * Returns an array of raw email objects
    */
-  private async fetchEmailsFromImap(): Promise<Email[]> {
-    return new Promise((resolve, reject) => {
-      if (!this.emailConfig) {
-        reject(new Error('Email configuration not available'));
-        return;
-      }
-
-      // Note: This would need to be adapted for browser environment
-      // The original code uses Node.js require() which won't work in browser
-      console.log('IMAP fetching would be implemented here');
-      resolve([]);
-    });
+  private async fetchAllRawEmails(): Promise<any[]> {
+    if (this.googleAuth) {
+      // Use Gmail API
+      return await this.fetchGmailRawEmails();
+    } else if (this.emailConfig) {
+      // Use IMAP
+      return await this.fetchImapRawEmails();
+    } else {
+      throw new Error('No email configuration or Google authentication available');
+    }
   }
 
   /**
-   * Load emails from Gmail API via IPC
+   * Fetch raw emails from Gmail API (returns array of raw email objects)
    */
-  private async loadGmailEmails(): Promise<void> {
-    if (!this.googleAuth) {
-      throw new Error('Google authentication not available');
-    }
-
+  private async fetchGmailRawEmails(): Promise<any[]> {
+    if (!this.googleAuth) throw new Error('Google authentication not available');
     try {
       console.log('Loading emails from Gmail API via IPC...');
-      
-      // Use IPC to fetch Gmail emails from main process
       const result = await ipcRenderer.invoke('fetch-gmail-emails', {
         auth: this.googleAuth,
         maxResults: 50,
         labelIds: ['INBOX']
       });
-      
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to fetch Gmail emails');
-      }
-      
+      if (!result.success) throw new Error(result.error || 'Failed to fetch Gmail emails');
       const emails = result.emails || [];
-      
       if (emails.length === 0) {
         console.log('No messages found in Gmail inbox');
-        this.emails = [];
-        return;
+        return [];
       }
-      
       console.log(`Found ${emails.length} messages in Gmail inbox`);
-      
       // Sort emails by date (newest first)
-      emails.sort((a: Email, b: Email) => {
+      emails.sort((a: any, b: any) => {
         const dateA = new Date(a.date).getTime();
         const dateB = new Date(b.date).getTime();
         return dateB - dateA;
       });
-      
-      // Validate and normalize email data
-      this.emails = emails.map((email: Email) => ({
-        ...email,
-        id: email.id || email.messageId,
-        messageId: email.messageId || email.id,
-        date: email.date || new Date().toISOString(),
-        from: email.from || 'Unknown Sender',
-        to: email.to || [],
-        subject: email.subject || 'No Subject',
-        body: email.body || '',
-        isHtml: typeof email.isHtml === 'boolean' ? email.isHtml : false
-      }));
-      
-      console.log(`Successfully loaded ${this.emails.length} emails from Gmail API`);
-      
-      // Process each email
-      const processedEmails = await Promise.all(
-        this.emails.map(async (email) => {
-          const debugInfo = {
-            id: email.id,
-            messageId: email.messageId,
-            threadId: email.threadId,
-            labels: email.labels,
-            snippet: email.snippet?.substring(0, 100),
-            hasBodyHtml: !!email.bodyHtml,
-            hasBodyText: !!email.bodyText,
-            hasBody: !!email.body,
-            bodyLength: email.body?.length || 0,
-            bodyPreview: email.body?.substring(0, 200) || 'no body'
-          };
-          
-          console.log('[DEBUG] Gmail API processed email:', debugInfo);
-          
-          // Special logging for the specific email we're investigating
-          if (email.messageId === '197af19f463a0a42') {
-            console.log('[DEBUG] TARGET EMAIL 197af19f463a0a42 DETAILS:', {
-              ...debugInfo,
-              bodyHtml: email.bodyHtml?.substring(0, 500),
-              bodyText: email.bodyText?.substring(0, 500),
-              body: email.body?.substring(0, 500)
-            });
-          }
-          
-          return email;
-        })
-      );
-      
-      this.emails = processedEmails;
-      
+      return emails;
     } catch (error) {
       console.error('Error loading Gmail emails:', error);
       throw error;
     }
+  }
+
+  /**
+   * Fetch raw emails from IMAP (returns array of raw email objects)
+   */
+  private async fetchImapRawEmails(): Promise<any[]> {
+    return new Promise((resolve, reject) => {
+      if (!this.emailConfig) {
+        reject(new Error('Email configuration not available'));
+        return;
+      }
+      // Note: This would need to be adapted for browser environment
+      // The original code uses Node.js require() which won't work in browser
+      console.log('IMAP fetching would be implemented here');
+      resolve([]);
+    });
   }
 
   /**

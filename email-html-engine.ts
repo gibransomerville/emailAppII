@@ -90,19 +90,21 @@ class EmailHtmlEngine {
             };
         }
 
-        // Step 2: Analyze HTML structure
-        const structure = this.analyzeHtmlStructure(htmlContent);
+        // Step 2: EARLY TABLE PROCESSING - Process tables before other modifications
+        let processedHtml = htmlContent;
+        const hasTables = this.containsTableHtml(htmlContent);
+        if (hasTables) {
+            processedHtml = this.optimizeTableLayout(processedHtml, this.createEmptyStructure());
+            processingSteps.push('Early table layout optimization applied');
+        }
+
+        // Step 3: Analyze HTML structure (after table processing)
+        const structure = this.analyzeHtmlStructure(processedHtml);
         processingSteps.push(`Analyzed structure: ${structure.layoutType} layout, ${structure.tableCount} tables`);
 
-        // Step 3: Pre-process HTML for email-specific patterns
-        let processedHtml = this.preprocessEmailHtml(htmlContent, structure);
+        // Step 4: Pre-process HTML for email-specific patterns
+        processedHtml = this.preprocessEmailHtml(processedHtml, structure);
         processingSteps.push('Pre-processed email HTML patterns');
-
-        // Step 4: Process tables for optimal rendering
-        if (structure.hasTablesLayout) {
-            processedHtml = this.optimizeTableLayout(processedHtml, structure);
-            processingSteps.push('Optimized table layouts');
-        }
 
         // Step 5: Process inline styles
         if (structure.hasComplexStyling) {

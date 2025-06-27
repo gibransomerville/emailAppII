@@ -5,6 +5,8 @@
 
 import { Email, EmailAddress } from './types/email.js';
 import { EmailHtmlEngine, type EmailHtmlRenderOptions } from './email-html-engine.js';
+import { GmailStyleProcessor } from './gmail-style-processor.js';
+import { emailProcessingConfig } from './email-processing-config.js';
 
 // Email rendering interfaces
 interface EmailCompatibleHtmlOptions {
@@ -25,9 +27,12 @@ interface EmailCompatibleHtmlOptions {
 
 class EmailRenderer {
     private htmlEngine: EmailHtmlEngine;
+    private gmailProcessor: GmailStyleProcessor;
 
-    constructor(htmlEngine: EmailHtmlEngine) {
-        this.htmlEngine = htmlEngine;
+    constructor() {
+        this.htmlEngine = new EmailHtmlEngine();
+        this.gmailProcessor = new GmailStyleProcessor();
+        console.log('EmailRenderer: Initialized with EmailHtmlEngine and GmailStyleProcessor');
     }
 
     /**
@@ -221,7 +226,7 @@ class EmailRenderer {
             // Add expanded content if needed
             if (isExpanded) {
                 try {
-                    const expandedContent = this.createGmailExpandedContent(email);
+                    const expandedContent = this.createExpandedContent(email);
                     emailElement.appendChild(expandedContent);
                 } catch (error) {
                     console.error('Error creating expanded content:', error);
@@ -317,7 +322,29 @@ class EmailRenderer {
     }
 
     /**
-     * Create Gmail-style expanded content using EmailHtmlEngine
+     * Create expanded content with automatic processing mode selection
+     * @param email - Email object
+     * @param options - Optional render options
+     * @returns Expanded content element
+     */
+    createExpandedContent(email: Email, options: Partial<EmailHtmlRenderOptions> = {}): HTMLElement {
+        // Auto-detect processing mode based on configuration
+        const processingMode = emailProcessingConfig.detectProcessingMode(email);
+        
+        if (emailProcessingConfig.getConfig().debug.showProcessingMode) {
+            console.log(`EmailRenderer: Using ${processingMode} processing for email:`, email.subject);
+        }
+        
+        // Route to appropriate processing method
+        if (processingMode === 'gmail-style') {
+            return this.createGmailExpandedContent(email, options);
+        } else {
+            return this.createStandardExpandedContent(email, options);
+        }
+    }
+
+    /**
+     * Create Gmail-style expanded content using GmailStyleProcessor
      * @param email - Email object
      * @param options - Optional render options
      * @returns Expanded content element
@@ -325,24 +352,148 @@ class EmailRenderer {
     createGmailExpandedContent(email: Email, options: Partial<EmailHtmlRenderOptions> = {}): HTMLElement {
         const expandedDiv = document.createElement('div');
         expandedDiv.className = 'gmail-expanded-content';
+        
         try {
-            // Use EmailHtmlEngine for advanced HTML processing
+            // Use Gmail-style processor for authentic Gmail experience
+            const gmailOptions = {
+                preserveGmailStructure: true,
+                handleGmailQuirks: true,
+                applyGmailStyling: true,
+                processGmailTables: true,
+                sanitizeGmailContent: true,
+                enableGmailResponsive: true
+            };
+            
+            const gmailResult = this.gmailProcessor.processGmailStyle(email, gmailOptions);
+            
+            // Check if the processed result is the 'No content available' message
+            const isNoHtmlContent = gmailResult.content && gmailResult.content.includes('No content available');
+            
+            if (isNoHtmlContent) {
+                // Try to render plain text fallback
+                let plainText = (email as any).text || email.bodyText || email.body || email.snippet || '';
+                plainText = plainText.trim();
+                let content = '';
+                if (plainText) {
+                    content = this.convertPlainTextToHtml(plainText);
+                } else {
+                    content = '<em>No content available</em>';
+                }
+                expandedDiv.innerHTML = `
+                    <div class="email-content">
+                        <div class="email-content-wrapper">
+                            ${content}
+                        </div>
+                    </div>
+                `;
+            } else {
+                // Create the expanded content with Gmail-processed HTML
+                expandedDiv.innerHTML = `
+                    <div class="email-content">
+                        ${gmailResult.content}
+                    </div>
+                `;
+            }
+            
+            // Log Gmail processing information for debugging
+            if (gmailResult.warnings.length > 0) {
+                console.warn('Gmail-style processing warnings:', gmailResult.warnings);
+            }
+            if (gmailResult.processingSteps.length > 0) {
+                console.log('Gmail-style processing steps:', gmailResult.processingSteps);
+            }
+            if (gmailResult.gmailFeatures) {
+                console.log('Gmail features detected:', gmailResult.gmailFeatures);
+            }
+            
+        } catch (error) {
+            console.error('Error processing email with Gmail-style processor:', error);
+            // Fallback to standard HTML engine
+            try {
+                const renderOptions: Partial<EmailHtmlRenderOptions> = {
+                    optimizeForDisplay: true,
+                    enhanceReadability: true,
+                    mobileOptimization: true,
+                    sanitizationLevel: 'standard',
+                    maxWidth: '100%',
+                    allowExternalImages: true,
+                    allowNonHttpsImages: false,
+                    blockTrackingPixels: true,
+                    showImageWarnings: true,
+                    ...options
+                };
+                
+                const processedResult = this.htmlEngine.processEmailHtml(email, renderOptions);
+                
+                if (processedResult.content && !processedResult.content.includes('No HTML content available')) {
+                    expandedDiv.innerHTML = `
+                        <div class="email-content">
+                            ${processedResult.content}
+                        </div>
+                    `;
+                } else {
+                    // Final fallback to plain text
+                    let plainText = (email as any).text || email.bodyText || email.body || email.snippet || '';
+                    plainText = plainText.trim();
+                    let content = '';
+                    if (plainText) {
+                        content = this.convertPlainTextToHtml(plainText);
+                    } else {
+                        content = '<em>No content available</em>';
+                    }
+                    expandedDiv.innerHTML = `
+                        <div class="email-content">
+                            <div class="email-content-wrapper">
+                                ${content}
+                            </div>
+                        </div>
+                    `;
+                }
+            } catch (fallbackError) {
+                console.error('Fallback processing also failed:', fallbackError);
+                expandedDiv.innerHTML = `
+                    <div class="email-content">
+                        <div class="email-content-wrapper">
+                            <em>Error processing email content</em>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        
+        return expandedDiv;
+    }
+
+    /**
+     * Create standard expanded content using EmailHtmlEngine (original method)
+     * @param email - Email object
+     * @param options - Optional render options
+     * @returns Expanded content element
+     */
+    createStandardExpandedContent(email: Email, options: Partial<EmailHtmlRenderOptions> = {}): HTMLElement {
+        const expandedDiv = document.createElement('div');
+        expandedDiv.className = 'standard-expanded-content';
+        
+        try {
+            // Use EmailHtmlEngine for standard processing
             const renderOptions: Partial<EmailHtmlRenderOptions> = {
                 optimizeForDisplay: true,
                 enhanceReadability: true,
                 mobileOptimization: true,
                 sanitizationLevel: 'standard',
                 maxWidth: '100%',
-                // Image security options - can be configured based on user preferences
                 allowExternalImages: true,
                 allowNonHttpsImages: false,
                 blockTrackingPixels: true,
                 showImageWarnings: true,
                 ...options
             };
+            
             const processedResult = this.htmlEngine.processEmailHtml(email, renderOptions);
+            
             // Check if the processed result is the 'No HTML content available' message
             const isNoHtmlContent = processedResult.content && processedResult.content.includes('No HTML content available');
+            
             if (isNoHtmlContent) {
                 // Try to render plain text fallback
                 let plainText = (email as any).text || email.bodyText || email.body || email.snippet || '';
@@ -368,13 +519,15 @@ class EmailRenderer {
                     </div>
                 `;
             }
+            
             // Log processing information for debugging
             if (processedResult.warnings.length > 0) {
-                console.warn('Email HTML processing warnings:', processedResult.warnings);
+                console.warn('Standard email HTML processing warnings:', processedResult.warnings);
             }
             if (processedResult.processingSteps.length > 0) {
-                console.log('Email HTML processing steps:', processedResult.processingSteps);
+                console.log('Standard email HTML processing steps:', processedResult.processingSteps);
             }
+            
         } catch (error) {
             console.error('Error processing email HTML:', error);
             // Fallback to simplified processing
@@ -394,6 +547,7 @@ class EmailRenderer {
                 </div>
             `;
         }
+        
         return expandedDiv;
     }
 

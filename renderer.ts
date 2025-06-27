@@ -10,7 +10,6 @@ import { EventManager } from './event-manager.js';
 import { AuthManager } from './auth-manager.js';
 import { getSearchManager } from './search-manager.js';
 import { SearchUI } from './ui-components.js';
-import { EmailHtmlEngine } from './email-html-engine.js';
 import { DOMPURIFY_CONFIG, EMAIL_PARSING_CONFIG } from './config.js';
 import { SafeHTML } from './safe-html.js';
 import { EmailManager } from './email-manager.js';
@@ -24,11 +23,8 @@ console.log('Settings button exists:', !!document.getElementById('settings-btn')
 console.log('Compose button exists:', !!document.getElementById('compose-btn'));
 console.log('DOM elements check completed');
 
-// Create EmailHtmlEngine instance with sanitizer and config
-const emailHtmlEngine = new EmailHtmlEngine();
-
-// Create EmailRenderer instance with EmailHtmlEngine dependency
-const emailRenderer = new EmailRenderer(emailHtmlEngine);
+// Create EmailRenderer instance (no longer needs EmailHtmlEngine as parameter)
+const emailRenderer = new EmailRenderer();
 
 // Create EmailManager instance with config and parser dependencies
 const emailManager = new EmailManager({
