@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Electron Email App</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h2><i class="fas fa-envelope"></i> Email App</h2>
+            </div>
+            
+            <div class="sidebar-actions">
+                <button id="compose-btn" class="compose-btn">
+                    <i class="fas fa-plus"></i> Compose
+                </button>
+            </div>
+            
+            <div class="conversations-search">
+                <div class="search-container">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="search-input" placeholder="Search conversations...">
+                </div>
+            </div>
+            
+            <nav class="conversations-nav">
+                <div class="conversations-list" id="conversations-list">
+                    <!-- Conversation items will be populated here -->
+                </div>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <button id="refresh-btn" class="refresh-btn">
+                    <i class="fas fa-sync"></i> Refresh
+                </button>
+                <button id="settings-btn" class="settings-btn">
+                    <i class="fas fa-cog"></i> Settings
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Messages Container -->
+            <div class="messages-container" id="messages-container">
+                <div class="messages-placeholder">
+                    <i class="fas fa-comments"></i>
+                    <h3>No messages yet</h3>
+                    <p>Your conversations will appear here</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Compose Email Modal -->
+    <div id="compose-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Compose Email</h3>
+                <button class="close-btn" id="close-compose">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="compose-form">
+                    <div class="form-group">
+                        <label for="to-input">To:</label>
+                        <input type="email" id="to-input" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="cc-input">CC:</label>
+                        <input type="email" id="cc-input">
+                    </div>
+                    <div class="form-group">
+                        <label for="subject-input">Subject:</label>
+                        <input type="text" id="subject-input" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="body-input">Message:</label>
+                        <textarea id="body-input" rows="10" required></textarea>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" id="save-draft-btn" class="btn-secondary">Save Draft</button>
+                        <button type="submit" class="btn-primary">Send</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Email Settings</h3>
+                <button class="close-btn" id="close-settings">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="settings-form">
+                    <div class="form-group">
+                        <label for="email-input">Email Address:</label>
+                        <input type="email" id="email-input" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="password-input">Password:</label>
+                        <input type="password" id="password-input" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="smtp-host">SMTP Host:</label>
+                        <input type="text" id="smtp-host" value="smtp.gmail.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="smtp-port">SMTP Port:</label>
+                        <input type="number" id="smtp-port" value="587">
+                    </div>
+                    <div class="form-group">
+                        <label for="imap-host">IMAP Host:</label>
+                        <input type="text" id="imap-host" value="imap.gmail.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="imap-port">IMAP Port:</label>
+                        <input type="number" id="imap-port" value="993">
+                    </div>
+                    <div class="form-group text-center">
+                        <button type="button" id="google-sso-btn" class="btn-primary" style="background: #4285F4; margin-bottom: 10px;">
+                            <i class="fab fa-google"></i> Sign in with Google
+                        </button>
+                        <button type="button" id="microsoft-sso-btn" class="btn-primary" style="background: #2F2FEE;">
+                            <i class="fab fa-microsoft"></i> Sign in with Microsoft
+                        </button>
+                    </div>
+                    
+                    <div class="theme-preferences">
+                        <label>Theme Preferences:</label>
+                        <div class="theme-selector">
+                            <div class="theme-option active" data-theme="light">
+                                <i class="fas fa-sun"></i>
+                                <span>Light</span>
+                            </div>
+                            <div class="theme-option" data-theme="dark">
+                                <i class="fas fa-moon"></i>
+                                <span>Dark</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-actions">
+                        <button type="submit" class="btn-primary">Save Settings</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="loading-spinner">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>Loading...</p>
+        </div>
+    </div>
+
+    <!-- OAuth Loading Modal -->
+    <div id="oauth-loading-modal" class="modal">
+        <div class="modal-content oauth-loading-content">
+            <div class="oauth-loading-header">
+                <div class="oauth-provider-icon">
+                    <i class="fab fa-google" id="oauth-provider-icon"></i>
+                </div>
+                <h3 id="oauth-loading-title">Connecting to Google</h3>
+            </div>
+            
+            <div class="oauth-loading-body">
+                <div class="oauth-progress-container">
+                    <div class="oauth-progress-bar">
+                        <div class="oauth-progress-fill" id="oauth-progress-fill"></div>
+                    </div>
+                    <div class="oauth-progress-text" id="oauth-progress-text">Initializing connection...</div>
+                </div>
+                
+                <div class="oauth-steps">
+                    <div class="oauth-step" id="step-1">
+                        <i class="fas fa-circle"></i>
+                        <span>Opening sign-in window</span>
+                    </div>
+                    <div class="oauth-step" id="step-2">
+                        <i class="far fa-circle"></i>
+                        <span>Waiting for authentication</span>
+                    </div>
+                    <div class="oauth-step" id="step-3">
+                        <i class="far fa-circle"></i>
+                        <span>Verifying permissions</span>
+                    </div>
+                    <div class="oauth-step" id="step-4">
+                        <i class="far fa-circle"></i>
+                        <span>Loading emails</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="oauth-loading-footer">
+                <button id="oauth-cancel-btn" class="btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Vite-built renderer module - loads all dependencies -->
+    <script type="module" src="dist/renderer.js"></script>
+</body>
+</html> 

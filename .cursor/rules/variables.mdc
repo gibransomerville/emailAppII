@@ -1,0 +1,10 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Were using Vite to build the project.
+The source files are in TypeScript (.ts), but we want the final output to be plain JavaScript (.js).
+All the compiled files go into a folder called dist/.
+We re using ES modules, not CommonJS, so everything uses import/export — no global variables.
+Each file in the src/ folder stays modular, meaning they stay separate instead of being bundled together into one file. This helps keep things clean and easy to import elsewhere.

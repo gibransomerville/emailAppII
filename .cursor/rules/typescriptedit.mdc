@@ -1,0 +1,17 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Remember to only edit the typescript files the goal is to have the .ts files complied to .js and have the app only reference the files in the dist folder using a modular build.
+
+Email formatting: 
+
+Table-based layouts with inline CSS - Gmail heavily relies on table structures for consistent rendering
+Inline styling required - External stylesheets are not supported; all CSS must be inline
+Limited font support - Primarily web-safe fonts (Arial, Helvetica, Google Sans, Roboto)
+Responsive design limitations - Uses media queries but with constraints
+Image handling - Images must be hosted online and publicly accessible
+Content processing - Automatically strips certain HTML elements and JavaScript for security
+
+Review this doc: https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/table
