@@ -14,6 +14,8 @@ import { DOMPURIFY_CONFIG, EMAIL_PARSING_CONFIG } from './config.js';
 import { SafeHTML } from './safe-html.js';
 import { EmailManager } from './email-manager.js';
 import { EmailRenderer } from './email-renderer.js';
+import { EmailFilterManager } from './email-filter-manager.js';
+import { MarketingEmailDetector } from './marketing-email-detector.js';
 
 console.log('=== IMPORTS COMPLETED ===');
 console.log('All modules imported successfully');
@@ -40,17 +42,21 @@ console.log('emailManager.standardizeEmailObject function name:', emailManager.s
 // Create instances with proper modular dependencies
 const emailComposer = getEmailComposer();
 
-// First create EventManager (it needs emailComposer but not imapEmailManager initially)
-console.log('=== CREATING EVENT MANAGER ===');
-const eventManager = new EventManager(emailComposer, null as any, emailRenderer); // Pass EmailRenderer instance
+// Create MarketingEmailDetector
+console.log('=== CREATING MARKETING EMAIL DETECTOR ===');
+const marketingEmailDetector = new MarketingEmailDetector();
 
-// Now create IMAPEmailManager with proper EventManager and EmailManager reference
+// Create IMAPEmailManager first with null event manager (will be set later)
 console.log('=== CREATING IMAP EMAIL MANAGER ===');
-const imapEmailManager = new IMAPEmailManager(uiThemeManager, eventManager, emailManager);
+const imapEmailManager = new IMAPEmailManager(uiThemeManager, null as any, emailManager);
+
+// Now create EventManager with all required dependencies
+console.log('=== CREATING EVENT MANAGER ===');
+const eventManager = new EventManager(emailComposer, imapEmailManager, emailRenderer, marketingEmailDetector);
 
 // Set the bidirectional reference
 console.log('=== SETTING BIDIRECTIONAL REFERENCES ===');
-(eventManager as any).imapEmailManager = imapEmailManager;
+imapEmailManager.setEventManager(eventManager);
 
 console.log('=== INSTANCES CREATED ===');
 console.log('EventManager created:', !!eventManager);
@@ -195,4 +201,7 @@ console.log('Renderer module loaded successfully');
     console.log('Conversations list children count:', conversationsList?.children.length || 'N/A');
 };
 
-console.log('Debugging functions added to window: manualLoadEmails(), debugConversations()'); 
+console.log('Debugging functions added to window: manualLoadEmails(), debugConversations()');
+
+// Add EmailFilterManager to global scope
+(window as any).emailFilterManager = new EmailFilterManager(); 

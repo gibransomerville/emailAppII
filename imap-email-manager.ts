@@ -181,6 +181,15 @@ export class IMAPEmailManager {
   }
 
   /**
+   * Set event manager after construction
+   * @param eventManager - Event manager instance
+   */
+  setEventManager(eventManager: EventManager): void {
+    this.eventManager = eventManager;
+    console.log('IMAPEmailManager: Event manager set');
+  }
+
+  /**
    * Get current emails
    * @returns Current emails array
    */

@@ -11,6 +11,7 @@
  * - AuthManager (OAuth functionality)
  * - SafeHTML (secure HTML rendering)
  * - EmailRenderer (email rendering)
+ * - MarketingEmailDetector (marketing email detection)
  * 
  * @author Email App Modular Architecture
  * @version 1.0.0
@@ -22,6 +23,7 @@ import { uiThemeManager } from './ui-theme-manager.js';
 import { EmailComposer } from './email-composer.js';
 import { IMAPEmailManager } from './imap-email-manager.js';
 import { EmailRenderer } from './email-renderer.js';
+import { MarketingEmailDetector } from './marketing-email-detector.js';
 
 // Import Electron modules conditionally for browser compatibility
 let ipcRenderer: any;
@@ -75,14 +77,16 @@ class EventManager {
     private emailComposer: EmailComposer;
     private imapEmailManager: IMAPEmailManager;
     private emailRenderer: EmailRenderer;
+    private marketingEmailDetector: MarketingEmailDetector;
 
-    constructor(emailComposer: EmailComposer, imapEmailManager: IMAPEmailManager, emailRenderer: EmailRenderer) {
+    constructor(emailComposer: EmailComposer, imapEmailManager: IMAPEmailManager, emailRenderer: EmailRenderer, marketingEmailDetector: MarketingEmailDetector) {
         this.initialized = false;
         this.oauthCancelRequested = false;
         this.domElements = {} as DOMElements;
         this.emailComposer = emailComposer;
         this.imapEmailManager = imapEmailManager;
         this.emailRenderer = emailRenderer;
+        this.marketingEmailDetector = marketingEmailDetector;
         
         // Initialize when DOM is ready
         if (document.readyState === 'loading') {
@@ -341,6 +345,50 @@ class EventManager {
         } else {
             console.error('Settings form not found');
         }
+
+        // Authentication method selection
+        this.setupAuthMethodSelection();
+    }
+
+    /**
+     * Setup authentication method selection
+     */
+    private setupAuthMethodSelection(): void {
+        const authOptions = document.querySelectorAll('.auth-option');
+        const imapConfig = document.getElementById('imap-config');
+        const ssoButtons = document.getElementById('sso-buttons');
+
+        authOptions.forEach(option => {
+            option.addEventListener('click', () => {
+                const method = (option as HTMLElement).dataset.method;
+                
+                // Remove selected class from all options
+                authOptions.forEach(opt => opt.classList.remove('selected'));
+                
+                // Add selected class to clicked option
+                option.classList.add('selected');
+                
+                // Show/hide appropriate sections
+                if (method === 'imap') {
+                    if (imapConfig) imapConfig.style.display = 'block';
+                    if (ssoButtons) ssoButtons.style.display = 'none';
+                } else {
+                    if (imapConfig) imapConfig.style.display = 'none';
+                    if (ssoButtons) ssoButtons.style.display = 'block';
+                }
+                
+                console.log('Authentication method selected:', method);
+            });
+        });
+
+        // Set default selection to Google SSO
+        const googleOption = document.querySelector('.auth-option[data-method="google"]');
+        if (googleOption) {
+            googleOption.classList.add('selected');
+            if (ssoButtons) ssoButtons.style.display = 'block';
+        }
+        
+        console.log('Authentication method selection setup completed');
     }
 
     /**
@@ -431,8 +479,10 @@ class EventManager {
      * Setup SSO button listeners
      */
     private setupSSOListeners(): void {
-        if (this.domElements.googleSSOBtn) {
-            this.domElements.googleSSOBtn.addEventListener('click', async () => {
+        // Google SSO button (now in the sso-buttons section)
+        const googleSSOBtn = document.getElementById('google-sso-btn');
+        if (googleSSOBtn) {
+            googleSSOBtn.addEventListener('click', async () => {
                 console.log('Google SSO button clicked');
                 try {
                     await AuthManager.handleGoogleSSO();
@@ -445,8 +495,10 @@ class EventManager {
             console.error('Google SSO button not found');
         }
         
-        if (this.domElements.microsoftSSOBtn) {
-            this.domElements.microsoftSSOBtn.addEventListener('click', async () => {
+        // Microsoft SSO button (now in the sso-buttons section)
+        const microsoftSSOBtn = document.getElementById('microsoft-sso-btn');
+        if (microsoftSSOBtn) {
+            microsoftSSOBtn.addEventListener('click', async () => {
                 console.log('Microsoft SSO button clicked');
                 try {
                     const result: SSOResult = await ipcRenderer.invoke('microsoft-sso');
@@ -805,8 +857,11 @@ class EventManager {
         
         messagesContainer.appendChild(emailsContainer);
         
-        // Scroll to bottom to show latest message
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        // Add marketing tags to emails
+        this.addMarketingTagsToEmails(emailsContainer, sortedEmails);
+        
+        // Scroll to top to show emails from the beginning
+        messagesContainer.scrollTop = 0;
         console.log('Conversation emails displayed successfully');
     }
     
@@ -935,6 +990,25 @@ class EventManager {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    /**
+     * Add marketing tags to emails
+     * @param emailsContainer - Emails container element
+     * @param emails - Emails array
+     */
+    private addMarketingTagsToEmails(emailsContainer: HTMLElement, emails: Email[]): void {
+        const emailElements = emailsContainer.querySelectorAll('.email-item');
+        
+        emailElements.forEach((emailElement, index) => {
+            const email = emails[index];
+            if (!email) return;
+
+            const tag = this.marketingEmailDetector.detectMarketingEmail(email);
+            this.marketingEmailDetector.addMarketingTagToElement(emailElement as HTMLElement, tag);
+        });
+        
+        console.log(`Marketing tags processed for ${emailElements.length} emails`);
     }
 }
 

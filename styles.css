@@ -349,6 +349,11 @@ body {
     height: 100vh;
 }
 
+/* Remove focus highlight from main-content */
+.main-content:focus {
+    outline: none;
+}
+
 /* Conversation Header */
 .conversation-header {
     padding: var(--sh-space-5) var(--sh-space-6);
@@ -413,6 +418,9 @@ body {
     padding: var(--sh-space-4) var(--sh-space-4) 0 var(--sh-space-4);
     scrollbar-width: thin;
     scrollbar-color: var(--sh-gray-300) transparent;
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
 }
 
 .messages-container::-webkit-scrollbar {
@@ -452,11 +460,6 @@ body {
 .email-item:hover {
     box-shadow: var(--sh-shadow-md);
     border-color: var(--sh-gray-300);
-}
-
-.email-item.latest {
-    border-color: var(--sh-blue);
-    background: var(--sh-blue-light);
 }
 
 /* Email Header */
@@ -3523,4 +3526,236 @@ body {
 
 [data-theme="dark"] .email-preprocessed-content .email-divider {
     border-top-color: #404040;
+}
+
+/* Marketing Email Tags */
+.marketing-tag {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background-color: #ff6b6b;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 10px;
+    font-weight: 600;
+    z-index: 10;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    transition: all 0.2s ease;
+    cursor: help;
+}
+
+.marketing-tag:hover {
+    background-color: #ff5252;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    transform: translateY(-1px);
+}
+
+/* Ensure email items have relative positioning for absolute tags */
+.email-item {
+    position: relative;
+}
+
+/* Dark theme support for marketing tags */
+[data-theme="dark"] .marketing-tag {
+    background-color: #ff5252;
+    color: white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+}
+
+[data-theme="dark"] .marketing-tag:hover {
+    background-color: #ff1744;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+}
+
+/* Settings Modal Specific Styles */
+.settings-modal-content {
+    max-width: 600px;
+    width: 95%;
+    max-height: 85vh;
+    overflow-y: auto;
+}
+
+.auth-method-section {
+    margin-bottom: var(--sh-space-6);
+}
+
+.auth-method-section h4 {
+    margin: 0 0 var(--sh-space-4) 0;
+    font-size: var(--sh-text-lg);
+    font-weight: var(--sh-font-semibold);
+    color: var(--sh-gray-900);
+}
+
+.auth-options {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sh-space-3);
+}
+
+.auth-option {
+    border: 2px solid var(--sh-gray-200);
+    border-radius: var(--sh-radius-lg);
+    padding: var(--sh-space-4);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: var(--sh-white);
+}
+
+.auth-option:hover {
+    border-color: var(--sh-gray-300);
+    background-color: var(--sh-gray-50);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.auth-option.selected {
+    border-color: var(--sh-blue);
+    background-color: var(--sh-blue-light);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.auth-option-content {
+    display: flex;
+    align-items: center;
+    gap: var(--sh-space-3);
+}
+
+.auth-option i {
+    font-size: var(--sh-text-xl);
+    width: 24px;
+    text-align: center;
+}
+
+.auth-option[data-method="google"] i {
+    color: #4285F4;
+}
+
+.auth-option[data-method="microsoft"] i {
+    color: #2F2FEE;
+}
+
+.auth-option[data-method="imap"] i {
+    color: var(--sh-gray-600);
+}
+
+.auth-option-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sh-space-1);
+}
+
+.auth-option-title {
+    font-weight: var(--sh-font-semibold);
+    color: var(--sh-gray-900);
+    font-size: var(--sh-text-sm);
+}
+
+.auth-option-desc {
+    color: var(--sh-gray-600);
+    font-size: var(--sh-text-xs);
+}
+
+.imap-config-section {
+    margin-bottom: var(--sh-space-6);
+    padding: var(--sh-space-4);
+    background-color: var(--sh-gray-50);
+    border-radius: var(--sh-radius-lg);
+    border: 1px solid var(--sh-gray-200);
+}
+
+.imap-config-section h4 {
+    margin: 0 0 var(--sh-space-4) 0;
+    font-size: var(--sh-text-lg);
+    font-weight: var(--sh-font-semibold);
+    color: var(--sh-gray-900);
+}
+
+.sso-buttons-section {
+    margin-bottom: var(--sh-space-6);
+}
+
+.sso-button-container {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sh-space-3);
+}
+
+.sso-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sh-space-2);
+    padding: var(--sh-space-3) var(--sh-space-4);
+    border: none;
+    border-radius: var(--sh-radius-lg);
+    font-size: var(--sh-text-sm);
+    font-weight: var(--sh-font-medium);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: var(--sh-white);
+}
+
+.google-sso-btn {
+    background-color: #4285F4;
+}
+
+.google-sso-btn:hover {
+    background-color: #3367D6;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(66, 133, 244, 0.3);
+}
+
+.microsoft-sso-btn {
+    background-color: #2F2FEE;
+}
+
+.microsoft-sso-btn:hover {
+    background-color: #1E1E8C;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(47, 47, 238, 0.3);
+}
+
+.theme-preferences h4 {
+    margin: 0 0 var(--sh-space-4) 0;
+    font-size: var(--sh-text-lg);
+    font-weight: var(--sh-font-semibold);
+    color: var(--sh-gray-900);
+}
+
+/* Dark theme adjustments */
+[data-theme="dark"] .auth-option {
+    background: var(--sh-gray-800);
+    border-color: var(--sh-gray-700);
+}
+
+[data-theme="dark"] .auth-option:hover {
+    background-color: var(--sh-gray-700);
+    border-color: var(--sh-gray-600);
+}
+
+[data-theme="dark"] .auth-option.selected {
+    background-color: rgba(59, 130, 246, 0.2);
+    border-color: var(--sh-blue);
+}
+
+[data-theme="dark"] .auth-option-title {
+    color: var(--sh-gray-100);
+}
+
+[data-theme="dark"] .auth-option-desc {
+    color: var(--sh-gray-400);
+}
+
+[data-theme="dark"] .imap-config-section {
+    background-color: var(--sh-gray-800);
+    border-color: var(--sh-gray-700);
+}
+
+[data-theme="dark"] .imap-config-section h4 {
+    color: var(--sh-gray-100);
+}
+
+[data-theme="dark"] .theme-preferences h4 {
+    color: var(--sh-gray-100);
 }

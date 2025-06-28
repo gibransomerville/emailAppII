@@ -94,48 +94,93 @@
 
     <!-- Settings Modal -->
     <div id="settings-modal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content settings-modal-content">
             <div class="modal-header">
                 <h3>Email Settings</h3>
                 <button class="close-btn" id="close-settings">&times;</button>
             </div>
             <div class="modal-body">
                 <form id="settings-form">
-                    <div class="form-group">
-                        <label for="email-input">Email Address:</label>
-                        <input type="email" id="email-input" required>
+                    <!-- Authentication Method Selection -->
+                    <div class="auth-method-section">
+                        <h4>Choose Authentication Method</h4>
+                        <div class="auth-options">
+                            <div class="auth-option" data-method="google">
+                                <div class="auth-option-content">
+                                    <i class="fab fa-google"></i>
+                                    <div class="auth-option-text">
+                                        <span class="auth-option-title">Google SSO</span>
+                                        <span class="auth-option-desc">Sign in with your Google account</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="auth-option" data-method="microsoft">
+                                <div class="auth-option-content">
+                                    <i class="fab fa-microsoft"></i>
+                                    <div class="auth-option-text">
+                                        <span class="auth-option-title">Microsoft SSO</span>
+                                        <span class="auth-option-desc">Sign in with your Microsoft account</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="auth-option" data-method="imap">
+                                <div class="auth-option-content">
+                                    <i class="fas fa-server"></i>
+                                    <div class="auth-option-text">
+                                        <span class="auth-option-title">IMAP/SMTP</span>
+                                        <span class="auth-option-desc">Manual server configuration</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="password-input">Password:</label>
-                        <input type="password" id="password-input" required>
+
+                    <!-- IMAP Configuration Fields (Hidden by default) -->
+                    <div id="imap-config" class="imap-config-section" style="display: none;">
+                        <h4>IMAP/SMTP Configuration</h4>
+                        <div class="form-group">
+                            <label for="email-input">Email Address:</label>
+                            <input type="email" id="email-input" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="password-input">Password:</label>
+                            <input type="password" id="password-input" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="smtp-host">SMTP Host:</label>
+                            <input type="text" id="smtp-host" value="smtp.gmail.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="smtp-port">SMTP Port:</label>
+                            <input type="number" id="smtp-port" value="587">
+                        </div>
+                        <div class="form-group">
+                            <label for="imap-host">IMAP Host:</label>
+                            <input type="text" id="imap-host" value="imap.gmail.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="imap-port">IMAP Port:</label>
+                            <input type="number" id="imap-port" value="993">
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="smtp-host">SMTP Host:</label>
-                        <input type="text" id="smtp-host" value="smtp.gmail.com">
-                    </div>
-                    <div class="form-group">
-                        <label for="smtp-port">SMTP Port:</label>
-                        <input type="number" id="smtp-port" value="587">
-                    </div>
-                    <div class="form-group">
-                        <label for="imap-host">IMAP Host:</label>
-                        <input type="text" id="imap-host" value="imap.gmail.com">
-                    </div>
-                    <div class="form-group">
-                        <label for="imap-port">IMAP Port:</label>
-                        <input type="number" id="imap-port" value="993">
-                    </div>
-                    <div class="form-group text-center">
-                        <button type="button" id="google-sso-btn" class="btn-primary" style="background: #4285F4; margin-bottom: 10px;">
-                            <i class="fab fa-google"></i> Sign in with Google
-                        </button>
-                        <button type="button" id="microsoft-sso-btn" class="btn-primary" style="background: #2F2FEE;">
-                            <i class="fab fa-microsoft"></i> Sign in with Microsoft
-                        </button>
+
+                    <!-- SSO Buttons (Hidden by default) -->
+                    <div id="sso-buttons" class="sso-buttons-section" style="display: none;">
+                        <div class="sso-button-container">
+                            <button type="button" id="google-sso-btn" class="sso-btn google-sso-btn">
+                                <i class="fab fa-google"></i>
+                                <span>Sign in with Google</span>
+                            </button>
+                            <button type="button" id="microsoft-sso-btn" class="sso-btn microsoft-sso-btn">
+                                <i class="fab fa-microsoft"></i>
+                                <span>Sign in with Microsoft</span>
+                            </button>
+                        </div>
                     </div>
                     
+                    <!-- Theme Preferences -->
                     <div class="theme-preferences">
-                        <label>Theme Preferences:</label>
+                        <h4>Theme Preferences</h4>
                         <div class="theme-selector">
                             <div class="theme-option active" data-theme="light">
                                 <i class="fas fa-sun"></i>
