@@ -356,7 +356,6 @@ class EventManager {
     private setupAuthMethodSelection(): void {
         const authOptions = document.querySelectorAll('.auth-option');
         const imapConfig = document.getElementById('imap-config');
-        const ssoButtons = document.getElementById('sso-buttons');
 
         authOptions.forEach(option => {
             option.addEventListener('click', () => {
@@ -371,12 +370,32 @@ class EventManager {
                 // Show/hide appropriate sections
                 if (method === 'imap') {
                     if (imapConfig) imapConfig.style.display = 'block';
-                    if (ssoButtons) ssoButtons.style.display = 'none';
                 } else {
                     if (imapConfig) imapConfig.style.display = 'none';
-                    if (ssoButtons) ssoButtons.style.display = 'block';
                 }
-                
+
+                // Trigger SSO logic if Google or Microsoft is clicked
+                if (method === 'google') {
+                    // Google SSO logic
+                    if (typeof AuthManager !== 'undefined' && AuthManager.handleGoogleSSO) {
+                        AuthManager.handleGoogleSSO();
+                    }
+                } else if (method === 'microsoft') {
+                    // Microsoft SSO logic
+                    if (typeof ipcRenderer !== 'undefined') {
+                        ipcRenderer.invoke('microsoft-sso').then((result: any) => {
+                            if (result.success) {
+                                // TODO: Store and use result.token for Microsoft Graph API
+                                console.log('Microsoft SSO successful! (Token received)');
+                            } else {
+                                console.error('Microsoft SSO failed:', result.error);
+                            }
+                        }).catch((error: any) => {
+                            console.error('Error in Microsoft SSO:', error);
+                        });
+                    }
+                }
+
                 console.log('Authentication method selected:', method);
             });
         });
@@ -385,7 +404,6 @@ class EventManager {
         const googleOption = document.querySelector('.auth-option[data-method="google"]');
         if (googleOption) {
             googleOption.classList.add('selected');
-            if (ssoButtons) ssoButtons.style.display = 'block';
         }
         
         console.log('Authentication method selection setup completed');

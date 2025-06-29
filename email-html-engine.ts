@@ -840,6 +840,61 @@ class EmailHtmlEngine {
     }
 
     /**
+     * Aggressively normalize spacing in likely signature/contact blocks and merge social icon rows
+     * @param html - HTML with tables
+     * @returns HTML with compact, symmetrical signature blocks
+     */
+    private normalizeSignatureBlockSpacing(html: string): string {
+        // Detect signature/contact tables by common patterns (logo+name+socials)
+        // For all <table> blocks that contain both an <img> (logo) and a name/title/socials, normalize spacing
+        return html.replace(
+            /(<table[^>]*>[\s\S]*?<\/table>)/gi,
+            (tableHtml) => {
+                // Only target likely signature blocks
+                if (
+                    /<img[^>]+(logo|photo|avatar|cloudfront|wisestamp)[^>]*>/i.test(tableHtml) &&
+                    /(Brian Grabowski|Client Advisor|casa\.io|linkedin|twitter|youtube|Client\s+Advisor|Advisor|Casa|@team\.casa|@casa\.io)/i.test(tableHtml)
+                ) {
+                    // Remove all paddings/margins from <td>, <tr>, <table>, <p>, <div>
+                    let normalized = tableHtml
+                        .replace(/<td([^>]*)style="[^"]*"/gi, '<td$1style="padding:0;margin:0;vertical-align:top;"')
+                        .replace(/<td([^>]*)>/gi, '<td$1 style="padding:0;margin:0;vertical-align:top;"')
+                        .replace(/<tr([^>]*)style="[^"]*"/gi, '<tr$1style="padding:0;margin:0;"')
+                        .replace(/<tr([^>]*)>/gi, '<tr$1 style="padding:0;margin:0;"')
+                        .replace(/<table([^>]*)style="[^"]*"/gi, '<table$1style="border-collapse:collapse;margin:0;padding:0;"')
+                        .replace(/<table([^>]*)>/gi, '<table$1 style="border-collapse:collapse;margin:0;padding:0;"')
+                        .replace(/<p([^>]*)style="[^"]*"/gi, '<p$1style="margin:0;line-height:1.2;"')
+                        .replace(/<p([^>]*)>/gi, '<p$1 style="margin:0;line-height:1.2;"')
+                        .replace(/<div([^>]*)style="[^"]*"/gi, '<div$1style="margin:0;padding:0;"')
+                        .replace(/<div([^>]*)>/gi, '<div$1 style="margin:0;padding:0;"');
+
+                    // Merge social icon rows into a single row
+                    // Find all <tr> that contain only a single <td> with a social icon (a > img)
+                    const socialRowRegex = /<tr[^>]*>\s*<td[^>]*>\s*(<a[^>]*>\s*<img[^>]+>\s*<\/a>)\s*<\/td>\s*<\/tr>/gi;
+                    let socialIcons: string[] = [];
+                    normalized = normalized.replace(socialRowRegex, (_match, icon) => {
+                        socialIcons.push(icon);
+                        return '%%SOCIAL_ICON_ROW%%'; // placeholder
+                    });
+                    if (socialIcons.length > 1) {
+                        // Remove all placeholders and insert a single merged row
+                        normalized = normalized.replace(/(%%SOCIAL_ICON_ROW%%\s*)+/g, '');
+                        // Insert merged row before </table>
+                        normalized = normalized.replace(
+                            /<\/table>/i,
+                            `<tr style="padding:0;margin:0;"><td style="padding:0;margin:0;vertical-align:top;" colspan="2">` +
+                            socialIcons.map(icon => `<span style="display:inline-block;margin-right:8px;vertical-align:middle;">${icon}</span>`).join('') +
+                            `</td></tr></table>`
+                        );
+                    }
+                    return normalized;
+                }
+                return tableHtml;
+            }
+        );
+    }
+
+    /**
      * Optimize table layouts for better email rendering
      * @param html - HTML with tables
      * @param _structure - Structure analysis (unused but kept for future use)
@@ -883,6 +938,9 @@ class EmailHtmlEngine {
                 return match;
             }
         );
+
+        // Aggressively normalize signature/contact block spacing
+        optimizedHtml = this.normalizeSignatureBlockSpacing(optimizedHtml);
 
         return optimizedHtml;
     }
