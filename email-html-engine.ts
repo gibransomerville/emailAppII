@@ -876,6 +876,7 @@ class EmailHtmlEngine {
                         socialIcons.push(icon);
                         return '%%SOCIAL_ICON_ROW%%'; // placeholder
                     });
+                    
                     if (socialIcons.length > 1) {
                         // Remove all placeholders and insert a single merged row
                         normalized = normalized.replace(/(%%SOCIAL_ICON_ROW%%\s*)+/g, '');
@@ -883,11 +884,23 @@ class EmailHtmlEngine {
                         normalized = normalized.replace(
                             /<\/table>/i,
                             `<tr style="padding:0;margin:0;"><td style="padding:0;margin:0;vertical-align:top;" colspan="2">` +
+                            `<div class="social-icons">` +
                             socialIcons.map(icon => `<span style="display:inline-block;margin-right:8px;vertical-align:middle;">${icon}</span>`).join('') +
-                            `</td></tr></table>`
+                            `</div></td></tr></table>`
+                        );
+                    } else if (socialIcons.length === 1) {
+                        // Single social icon - wrap it in social-icons div
+                        normalized = normalized.replace(
+                            /%%SOCIAL_ICON_ROW%%/g,
+                            `<tr style="padding:0;margin:0;"><td style="padding:0;margin:0;vertical-align:top;" colspan="2">` +
+                            `<div class="social-icons">` +
+                            `<span style="display:inline-block;margin-right:8px;vertical-align:middle;">${socialIcons[0]}</span>` +
+                            `</div></td></tr>`
                         );
                     }
-                    return normalized;
+
+                    // Wrap the entire signature block in email-signature class
+                    return `<div class="email-signature">${normalized}</div>`;
                 }
                 return tableHtml;
             }
@@ -941,6 +954,9 @@ class EmailHtmlEngine {
 
         // Aggressively normalize signature/contact block spacing
         optimizedHtml = this.normalizeSignatureBlockSpacing(optimizedHtml);
+
+        // Wrap general footer content
+        optimizedHtml = this.wrapFooterContent(optimizedHtml);
 
         return optimizedHtml;
     }
@@ -1218,6 +1234,39 @@ class EmailHtmlEngine {
      */
     containsTableHtml(content: string): boolean {
         return /<(table|tr|td|th|tbody|thead|tfoot)[\s>]/i.test(content);
+    }
+
+    /**
+     * Detect and wrap general footer content in email-footer class
+     * @param html - HTML content
+     * @returns HTML with footer content wrapped
+     */
+    private wrapFooterContent(html: string): string {
+        // Common footer patterns
+        const footerPatterns = [
+            // Unsubscribe patterns
+            /(<div[^>]*>[\s\S]*?(?:unsubscribe|opt.?out|manage.?preferences|email.?preferences)[\s\S]*?<\/div>)/gi,
+            // Company footer patterns
+            /(<div[^>]*>[\s\S]*?(?:©|copyright|all.?rights.?reserved|privacy.?policy|terms.?of.?service)[\s\S]*?<\/div>)/gi,
+            // Contact info patterns
+            /(<div[^>]*>[\s\S]*?(?:contact|support|help|info@|sales@)[\s\S]*?<\/div>)/gi,
+            // Social media patterns (if not already in signature)
+            /(<div[^>]*>[\s\S]*?(?:follow.?us|connect.?with.?us|social.?media)[\s\S]*?<\/div>)/gi
+        ];
+
+        let processedHtml = html;
+        
+        footerPatterns.forEach(pattern => {
+            processedHtml = processedHtml.replace(pattern, (match) => {
+                // Don't wrap if already wrapped
+                if (match.includes('class="email-footer"') || match.includes('class="email-signature"')) {
+                    return match;
+                }
+                return `<div class="email-footer">${match}</div>`;
+            });
+        });
+
+        return processedHtml;
     }
 }
 
