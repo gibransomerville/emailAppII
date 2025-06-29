@@ -476,17 +476,9 @@ body {
     gap: var(--sh-space-3);
 }
 
+/* Remove sender-avatar styling and hide the element */
 .sender-avatar {
-    width: 40px;
-    height: 40px;
-    border-radius: var(--sh-radius-full);
-    background: var(--sh-blue);
-    color: var(--sh-white);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: var(--sh-font-bold);
-    font-size: var(--sh-text-sm);
+    display: none !important;
 }
 
 .sender-details {
@@ -2736,4 +2728,10 @@ table.structure__table {
     margin-left: auto;
     margin-right: auto;
     display: table;
+}
+
+/* Reinforce centering for settings modal content */
+.modal-content.settings-modal-content {
+    margin-left: auto;
+    margin-right: auto;
 }
