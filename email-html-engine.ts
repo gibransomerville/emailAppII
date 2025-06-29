@@ -62,6 +62,8 @@ class EmailHtmlEngine {
             bodyLength: email.body?.length || 0
         });
         
+        console.log('[DEBUG] processEmailHtml: Starting processing...');
+        
         const fullOptions: EmailHtmlRenderOptions = {
             maxWidth: '100%',
             optimizeForDisplay: true,
@@ -76,6 +78,7 @@ class EmailHtmlEngine {
         const warnings: string[] = [];
 
         // Step 1: Extract HTML content
+        console.log('[DEBUG] processEmailHtml: Step 1 - Extracting HTML content...');
         const htmlContent = this.extractHtmlContent(email);
         console.log('[DEBUG] processEmailHtml input:', htmlContent.substring(0, 500));
         processingSteps.push(`Extracted HTML content (${htmlContent.length} chars)`);
@@ -91,25 +94,41 @@ class EmailHtmlEngine {
         }
 
         // Step 2: EARLY TABLE PROCESSING - Process tables before other modifications
+        console.log('[DEBUG] processEmailHtml: Step 2 - Early table processing...');
         let processedHtml = htmlContent;
         const hasTables = this.containsTableHtml(htmlContent);
         if (hasTables) {
+            console.log('[DEBUG] Before optimizeTableLayout:', processedHtml.substring(0, 1000));
             processedHtml = this.optimizeTableLayout(processedHtml, this.createEmptyStructure());
+            console.log('[DEBUG] After optimizeTableLayout:', processedHtml.substring(0, 1000));
             processingSteps.push('Early table layout optimization applied');
         }
 
         // Step 3: Analyze HTML structure (after table processing)
+        console.log('[DEBUG] processEmailHtml: Step 3 - Analyzing HTML structure...');
         const structure = this.analyzeHtmlStructure(processedHtml);
         processingSteps.push(`Analyzed structure: ${structure.layoutType} layout, ${structure.tableCount} tables`);
 
         // Step 4: Pre-process HTML for email-specific patterns
+        console.log('[DEBUG] Before preprocessEmailHtml:', processedHtml.substring(0, 1000));
         processedHtml = this.preprocessEmailHtml(processedHtml, structure);
+        console.log('[DEBUG] After preprocessEmailHtml:', processedHtml.substring(0, 1000));
         processingSteps.push('Pre-processed email HTML patterns');
 
         // Step 5: Process inline styles
+        console.log('[DEBUG] Before processInlineStyles check:', {
+            hasComplexStyling: structure.hasComplexStyling,
+            inlineStyleElements: structure.inlineStyleElements,
+            willCallProcessInlineStyles: structure.hasComplexStyling
+        });
+        
         if (structure.hasComplexStyling) {
+            console.log('[DEBUG] Calling processInlineStyles...');
             processedHtml = this.processInlineStyles(processedHtml, fullOptions);
             processingSteps.push('Processed inline styles');
+            console.log('[DEBUG] processInlineStyles completed');
+        } else {
+            console.log('[DEBUG] Skipping processInlineStyles - hasComplexStyling is false');
         }
 
         // Step 6: Handle images and media
@@ -128,6 +147,10 @@ class EmailHtmlEngine {
         processedHtml = this.sanitizeEmailHtml(processedHtml, fullOptions.sanitizationLevel);
         processingSteps.push('Applied final HTML sanitization');
 
+        // Step 8.5: Gmail-style flattening of footer/social block tables
+        processedHtml = this.flattenFooterTablesGmailStyle(processedHtml);
+        processingSteps.push('Flattened footer/social block tables (Gmail-style)');
+
         // Step 9: Wrap in email container with proper styling
         const finalHtml = this.wrapInEmailContainer(processedHtml, structure, fullOptions);
         processingSteps.push('Wrapped in email display container');
@@ -138,6 +161,25 @@ class EmailHtmlEngine {
             processingSteps,
             warnings
         });
+
+        // Search for the problematic td element after processing
+        const problematicTdMatchAfter = processedHtml.match(/<td[^>]*style="[^"]*proxima-nova[^"]*"[^>]*>/i);
+        if (problematicTdMatchAfter) {
+            console.log('[DEBUG] Found problematic td element AFTER processing:', problematicTdMatchAfter[0]);
+        }
+        
+        // Search for "Connect With Us" td element after processing
+        const connectWithUsMatchAfter = processedHtml.match(/<td[^>]*style="[^"]*Connect With Us[^"]*"[^>]*>/i);
+        if (connectWithUsMatchAfter) {
+            console.log('[DEBUG] Found "Connect With Us" td element AFTER processing:', connectWithUsMatchAfter[0]);
+        }
+        
+        // Search for td elements with generic styles after processing
+        const genericStyleMatchesAfter = processedHtml.match(/<td[^>]*style="[^"]*display: table-cell; vertical-align: top[^"]*"[^>]*>/gi);
+        if (genericStyleMatchesAfter && genericStyleMatchesAfter.length > 0) {
+            console.log('[DEBUG] Found td elements with generic styles AFTER processing:', genericStyleMatchesAfter.length);
+            console.log('[DEBUG] First few generic style matches AFTER processing:', genericStyleMatchesAfter.slice(0, 3));
+        }
 
         return {
             content: finalHtml,
@@ -709,10 +751,29 @@ class EmailHtmlEngine {
         // Check for inline images
         structure.hasInlineImages = /<img[^>]*>/i.test(html) || /cid:/i.test(html);
 
-        // Count elements with inline styles
-        const inlineStyleMatches = html.match(/style\s*=\s*["'][^"']+["']/gi) || [];
-        structure.inlineStyleElements = inlineStyleMatches.length;
-        structure.hasComplexStyling = structure.inlineStyleElements > 10;
+        // Count elements with inline styles - improved regex to catch more patterns
+        const inlineStyleMatches = html.match(/style\s*=\s*["'][^"']*["']/gi) || [];
+        const inlineStyleMatches2 = html.match(/style\s*=\s*[""][^""]*[""]/gi) || [];
+        const allInlineStyleMatches = [...inlineStyleMatches, ...inlineStyleMatches2];
+        structure.inlineStyleElements = allInlineStyleMatches.length;
+        structure.hasComplexStyling = structure.inlineStyleElements > 1; // TEMPORARILY CHANGED FROM 10 TO 1 FOR TESTING
+        
+        console.log('[DEBUG] Inline style analysis:', {
+            totalMatches: allInlineStyleMatches.length,
+            singleQuoteMatches: inlineStyleMatches.length,
+            doubleQuoteMatches: inlineStyleMatches2.length,
+            firstFewMatches: allInlineStyleMatches.slice(0, 3),
+            hasComplexStyling: structure.hasComplexStyling
+        });
+        
+        console.log('[DEBUG] analyzeHtmlStructure results:', {
+            inlineStyleElements: structure.inlineStyleElements,
+            hasComplexStyling: structure.hasComplexStyling,
+            tableCount: structure.tableCount,
+            hasTablesLayout: structure.hasTablesLayout,
+            layoutType: structure.layoutType,
+            detectedEmailClient: structure.detectedEmailClient
+        });
 
         return structure;
     }
@@ -840,74 +901,6 @@ class EmailHtmlEngine {
     }
 
     /**
-     * Aggressively normalize spacing in likely signature/contact blocks and merge social icon rows
-     * @param html - HTML with tables
-     * @returns HTML with compact, symmetrical signature blocks
-     */
-    private normalizeSignatureBlockSpacing(html: string): string {
-        // Detect signature/contact tables by common patterns (logo+name+socials)
-        // For all <table> blocks that contain both an <img> (logo) and a name/title/socials, normalize spacing
-        return html.replace(
-            /(<table[^>]*>[\s\S]*?<\/table>)/gi,
-            (tableHtml) => {
-                // Only target likely signature blocks
-                if (
-                    /<img[^>]+(logo|photo|avatar|cloudfront|wisestamp)[^>]*>/i.test(tableHtml) &&
-                    /(Brian Grabowski|Client Advisor|casa\.io|linkedin|twitter|youtube|Client\s+Advisor|Advisor|Casa|@team\.casa|@casa\.io)/i.test(tableHtml)
-                ) {
-                    // Remove all paddings/margins from <td>, <tr>, <table>, <p>, <div>
-                    let normalized = tableHtml
-                        .replace(/<td([^>]*)style="[^"]*"/gi, '<td$1style="padding:0;margin:0;vertical-align:top;"')
-                        .replace(/<td([^>]*)>/gi, '<td$1 style="padding:0;margin:0;vertical-align:top;"')
-                        .replace(/<tr([^>]*)style="[^"]*"/gi, '<tr$1style="padding:0;margin:0;"')
-                        .replace(/<tr([^>]*)>/gi, '<tr$1 style="padding:0;margin:0;"')
-                        .replace(/<table([^>]*)style="[^"]*"/gi, '<table$1style="border-collapse:collapse;margin:0;padding:0;"')
-                        .replace(/<table([^>]*)>/gi, '<table$1 style="border-collapse:collapse;margin:0;padding:0;"')
-                        .replace(/<p([^>]*)style="[^"]*"/gi, '<p$1style="margin:0;line-height:1.2;"')
-                        .replace(/<p([^>]*)>/gi, '<p$1 style="margin:0;line-height:1.2;"')
-                        .replace(/<div([^>]*)style="[^"]*"/gi, '<div$1style="margin:0;padding:0;"')
-                        .replace(/<div([^>]*)>/gi, '<div$1 style="margin:0;padding:0;"');
-
-                    // Merge social icon rows into a single row
-                    // Find all <tr> that contain only a single <td> with a social icon (a > img)
-                    const socialRowRegex = /<tr[^>]*>\s*<td[^>]*>\s*(<a[^>]*>\s*<img[^>]+>\s*<\/a>)\s*<\/td>\s*<\/tr>/gi;
-                    let socialIcons: string[] = [];
-                    normalized = normalized.replace(socialRowRegex, (_match, icon) => {
-                        socialIcons.push(icon);
-                        return '%%SOCIAL_ICON_ROW%%'; // placeholder
-                    });
-                    
-                    if (socialIcons.length > 1) {
-                        // Remove all placeholders and insert a single merged row
-                        normalized = normalized.replace(/(%%SOCIAL_ICON_ROW%%\s*)+/g, '');
-                        // Insert merged row before </table>
-                        normalized = normalized.replace(
-                            /<\/table>/i,
-                            `<tr style="padding:0;margin:0;"><td style="padding:0;margin:0;vertical-align:top;" colspan="2">` +
-                            `<div class="social-icons">` +
-                            socialIcons.map(icon => `<span style="display:inline-block;margin-right:8px;vertical-align:middle;">${icon}</span>`).join('') +
-                            `</div></td></tr></table>`
-                        );
-                    } else if (socialIcons.length === 1) {
-                        // Single social icon - wrap it in social-icons div
-                        normalized = normalized.replace(
-                            /%%SOCIAL_ICON_ROW%%/g,
-                            `<tr style="padding:0;margin:0;"><td style="padding:0;margin:0;vertical-align:top;" colspan="2">` +
-                            `<div class="social-icons">` +
-                            `<span style="display:inline-block;margin-right:8px;vertical-align:middle;">${socialIcons[0]}</span>` +
-                            `</div></td></tr>`
-                        );
-                    }
-
-                    // Wrap the entire signature block in email-signature class
-                    return `<div class="email-signature">${normalized}</div>`;
-                }
-                return tableHtml;
-            }
-        );
-    }
-
-    /**
      * Optimize table layouts for better email rendering
      * @param html - HTML with tables
      * @param _structure - Structure analysis (unused but kept for future use)
@@ -932,11 +925,16 @@ class EmailHtmlEngine {
         optimizedHtml = optimizedHtml.replace(
             /<td([^>]*)>/gi,
             (match, attributes) => {
-                if (!attributes.includes('style=')) {
+                // Only add generic styles if no style attribute exists AND no other styling attributes
+                if (!attributes.includes('style=') && 
+                    !attributes.includes('width=') && 
+                    !attributes.includes('valign=') && 
+                    !attributes.includes('align=') && 
+                    !attributes.includes('bgcolor=') && 
+                    !attributes.includes('class=')) {
                     return `<td${attributes} style="display: table-cell; vertical-align: top;">`;
-                } else if (!attributes.includes('display:') && !attributes.includes('vertical-align:')) {
-                    return match.replace('style="', 'style="display: table-cell; vertical-align: top; ');
                 }
+                // If any styling attributes exist, preserve them completely - don't modify
                 return match;
             }
         );
@@ -952,12 +950,6 @@ class EmailHtmlEngine {
             }
         );
 
-        // Aggressively normalize signature/contact block spacing
-        optimizedHtml = this.normalizeSignatureBlockSpacing(optimizedHtml);
-
-        // Wrap general footer content
-        optimizedHtml = this.wrapFooterContent(optimizedHtml);
-
         return optimizedHtml;
     }
 
@@ -968,42 +960,86 @@ class EmailHtmlEngine {
      * @returns HTML with processed styles
      */
     processInlineStyles(html: string, options: EmailHtmlRenderOptions): string {
+        console.log('[DEBUG] processInlineStyles input:', html.substring(0, 1000));
+        
+        // Search for the specific problematic td element
+        const problematicTdMatch = html.match(/<td[^>]*style="[^"]*proxima-nova[^"]*"[^>]*>/i);
+        if (problematicTdMatch) {
+            console.log('[DEBUG] Found problematic td element:', problematicTdMatch[0]);
+        }
+        
+        // Search for "Connect With Us" td element
+        const connectWithUsMatch = html.match(/<td[^>]*style="[^"]*Connect With Us[^"]*"[^>]*>/i);
+        if (connectWithUsMatch) {
+            console.log('[DEBUG] Found "Connect With Us" td element:', connectWithUsMatch[0]);
+        }
+        
+        // Search for td elements with generic styles that might be getting prepended
+        const genericStyleMatches = html.match(/<td[^>]*style="[^"]*display: table-cell; vertical-align: top[^"]*"[^>]*>/gi);
+        if (genericStyleMatches && genericStyleMatches.length > 0) {
+            console.log('[DEBUG] Found td elements with generic styles:', genericStyleMatches.length);
+            console.log('[DEBUG] First few generic style matches:', genericStyleMatches.slice(0, 3));
+        }
+        
         let processedHtml = html;
 
-        // Extract and normalize font styles
-        processedHtml = processedHtml.replace(
-            /style\s*=\s*["']([^"']*font-family:[^"']*?)["']/gi,
-            (_match: string, styleContent: string) => {
-                // Normalize font families to web-safe fonts
-                let normalizedStyle = styleContent.replace(
-                    /font-family\s*:\s*([^;]+)/gi,
-                    (_fontMatch: string, fontList: string) => {
-                        const webSafeFonts = this.normalizeToWebSafeFonts(fontList);
-                        return `font-family: ${webSafeFonts}`;
+        // Use DOMParser for robust style manipulation
+        if (typeof window !== 'undefined' && window.DOMParser && options.maxWidth) {
+            const parser = new window.DOMParser();
+            const doc = parser.parseFromString(processedHtml, 'text/html');
+            doc.querySelectorAll('[style]').forEach((el) => {
+                const style = el.getAttribute('style') || '';
+                const tagName = el.tagName.toLowerCase();
+                
+                // Only add max-width to elements that need responsive behavior
+                // Skip elements that already have max-width or specific styling that should be preserved
+                if (!/max-width\s*:/.test(style)) {
+                    let shouldAddMaxWidth = false;
+                    
+                    if (tagName === 'img') {
+                        shouldAddMaxWidth = true;
+                    } else if (tagName === 'table') {
+                        shouldAddMaxWidth = true;
+                    } else if (tagName === 'td') {
+                        // Only add max-width to td elements that are simple/generic
+                        // Skip td elements with complex styling (fonts, colors, padding, etc.)
+                        const hasComplexStyling = /(font-family|font-size|color|padding|margin|background|border|text-align|vertical-align)/.test(style);
+                        shouldAddMaxWidth = !hasComplexStyling;
                     }
-                );
-                return `style="${normalizedStyle}"`;
-            }
-        );
-
-        // Handle max-width constraints
-        if (options.maxWidth) {
-            processedHtml = processedHtml.replace(
-                /style\s*=\s*["']([^"']*?)["']/gi,
-                (match, styleContent) => {
-                    if (!styleContent.includes('max-width')) {
-                        return `style="${styleContent}; max-width: ${options.maxWidth};"`;
+                    
+                    if (shouldAddMaxWidth) {
+                        el.setAttribute('style', style.replace(/;?$/, `; max-width: ${options.maxWidth};`));
                     }
-                    return match;
                 }
-            );
+            });
+            processedHtml = doc.body.innerHTML;
         }
 
-        // Enhance readability styles
+        // Enhance readability styles only if requested
         if (options.enhanceReadability) {
             processedHtml = this.enhanceReadabilityStyles(processedHtml);
         }
-
+        
+        // Search for the problematic td element after processing
+        const problematicTdMatchAfter = processedHtml.match(/<td[^>]*style="[^"]*proxima-nova[^"]*"[^>]*>/i);
+        if (problematicTdMatchAfter) {
+            console.log('[DEBUG] Found problematic td element AFTER processing:', problematicTdMatchAfter[0]);
+        }
+        
+        // Search for "Connect With Us" td element after processing
+        const connectWithUsMatchAfter = processedHtml.match(/<td[^>]*style="[^"]*Connect With Us[^"]*"[^>]*>/i);
+        if (connectWithUsMatchAfter) {
+            console.log('[DEBUG] Found "Connect With Us" td element AFTER processing:', connectWithUsMatchAfter[0]);
+        }
+        
+        // Search for td elements with generic styles after processing
+        const genericStyleMatchesAfter = processedHtml.match(/<td[^>]*style="[^"]*display: table-cell; vertical-align: top[^"]*"[^>]*>/gi);
+        if (genericStyleMatchesAfter && genericStyleMatchesAfter.length > 0) {
+            console.log('[DEBUG] Found td elements with generic styles AFTER processing:', genericStyleMatchesAfter.length);
+            console.log('[DEBUG] First few generic style matches AFTER processing:', genericStyleMatchesAfter.slice(0, 3));
+        }
+        
+        console.log('[DEBUG] processInlineStyles output:', processedHtml.substring(0, 1000));
         return processedHtml;
     }
 
@@ -1237,36 +1273,83 @@ class EmailHtmlEngine {
     }
 
     /**
-     * Detect and wrap general footer content in email-footer class
+     * Gmail-style: Flatten table structure for likely footer/social blocks
+     * - Looks at the last 1-3 tables in the email body
+     * - If a table contains 2+ social/media links/icons, it is flattened (wrappers removed)
+     * - Uses DOM, not regex, for safety
      * @param html - HTML content
-     * @returns HTML with footer content wrapped
+     * @returns HTML with flattened footer/social block tables
      */
-    private wrapFooterContent(html: string): string {
-        // Common footer patterns
-        const footerPatterns = [
-            // Unsubscribe patterns
-            /(<div[^>]*>[\s\S]*?(?:unsubscribe|opt.?out|manage.?preferences|email.?preferences)[\s\S]*?<\/div>)/gi,
-            // Company footer patterns
-            /(<div[^>]*>[\s\S]*?(?:©|copyright|all.?rights.?reserved|privacy.?policy|terms.?of.?service)[\s\S]*?<\/div>)/gi,
-            // Contact info patterns
-            /(<div[^>]*>[\s\S]*?(?:contact|support|help|info@|sales@)[\s\S]*?<\/div>)/gi,
-            // Social media patterns (if not already in signature)
-            /(<div[^>]*>[\s\S]*?(?:follow.?us|connect.?with.?us|social.?media)[\s\S]*?<\/div>)/gi
-        ];
+    flattenFooterTablesGmailStyle(html: string): string {
+        if (typeof window === 'undefined' || !window.DOMParser) return html;
+        try {
+            const parser = new window.DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const tables = Array.from(doc.querySelectorAll('table'));
+            // Only look at the last 3 tables in the body
+            const candidateTables = tables.slice(-3);
+            let didFlatten = false;
+            candidateTables.forEach(table => {
+                // Heuristic: 2+ <a> with <img> (social/media icons)
+                const socialLinks = Array.from(table.querySelectorAll('a > img'));
+                if (socialLinks.length >= 2) {
+                    // --- Enhanced flattening and centering ---
+                    // 1. Collect all <a><img></a> parents (the <a> tags)
+                    const iconLinks = socialLinks.map(img => img.parentElement as HTMLElement).filter(Boolean);
 
-        let processedHtml = html;
-        
-        footerPatterns.forEach(pattern => {
-            processedHtml = processedHtml.replace(pattern, (match) => {
-                // Don't wrap if already wrapped
-                if (match.includes('class="email-footer"') || match.includes('class="email-signature"')) {
-                    return match;
+                    // 2. Remove all existing rows in the table
+                    while (table.rows.length) table.deleteRow(0);
+
+                    // 3. Optionally, find any text content (e.g., "Connect With Us")
+                    let textContent = '';
+                    // Look for <p>, <span>, or text nodes in the table that are not inside <a>
+                    table.querySelectorAll('p, span, td, div').forEach(el => {
+                        if (!el.querySelector('a > img') && el.textContent && el.textContent.trim().length > 0) {
+                            const txt = el.textContent.trim();
+                            if (txt.length > 0 && txt.length < 64 && /connect|follow|social|stay|in touch|with us/i.test(txt)) {
+                                textContent = txt;
+                            }
+                        }
+                    });
+
+                    // 4. Create a new row for the text (if found)
+                    if (textContent) {
+                        const textRow = table.ownerDocument.createElement('tr');
+                        const textTd = table.ownerDocument.createElement('td');
+                        textTd.colSpan = iconLinks.length;
+                        textTd.setAttribute('align', 'center');
+                        textTd.setAttribute('style', 'text-align:center; font-weight:bold; font-size:16px; padding-bottom:8px;');
+                        textTd.textContent = textContent;
+                        textRow.appendChild(textTd);
+                        table.appendChild(textRow);
+                    }
+
+                    // 5. Create a new row for the icons
+                    const iconRow = table.ownerDocument.createElement('tr');
+                    iconLinks.forEach(icon => {
+                        const td = table.ownerDocument.createElement('td');
+                        td.setAttribute('align', 'center');
+                        td.setAttribute('style', 'text-align:center; padding:0 8px;');
+                        td.appendChild(icon.cloneNode(true));
+                        iconRow.appendChild(td);
+                    });
+                    table.appendChild(iconRow);
+
+                    // 6. Set table alignment and style
+                    table.setAttribute('align', 'center');
+                    table.setAttribute('style', 'margin:0 auto;');
+
+                    didFlatten = true;
                 }
-                return `<div class="email-footer">${match}</div>`;
             });
-        });
-
-        return processedHtml;
+            if (didFlatten) {
+                return doc.body.innerHTML;
+            }
+        } catch (e) {
+            // Fallback: return original HTML
+            return html;
+        }
+        return html;
     }
 }
 
