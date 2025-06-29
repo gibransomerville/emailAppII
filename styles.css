@@ -2734,4 +2734,9 @@ table.structure__table {
 .modal-content.settings-modal-content {
     margin-left: auto;
     margin-right: auto;
+    display: flex;
+    flex-direction: column;
+    max-width: 50%;
+    width: 100%;
+    height: auto;
 }

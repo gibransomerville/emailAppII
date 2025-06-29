@@ -206,7 +206,7 @@ export class UIThemeManager {
             });
             
             // Force show the modal with multiple approaches
-            modal.style.display = 'block';
+            modal.style.display = 'flex';
             modal.style.visibility = 'visible';
             modal.style.opacity = '1';
             modal.classList.add('show');
