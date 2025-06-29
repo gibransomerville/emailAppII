@@ -358,15 +358,13 @@ class EventManager {
         const imapConfig = document.getElementById('imap-config');
 
         authOptions.forEach(option => {
-            option.addEventListener('click', () => {
+            option.addEventListener('click', async () => {
                 const method = (option as HTMLElement).dataset.method;
-                
                 // Remove selected class from all options
                 authOptions.forEach(opt => opt.classList.remove('selected'));
-                
                 // Add selected class to clicked option
                 option.classList.add('selected');
-                
+
                 // Show/hide appropriate sections
                 if (method === 'imap') {
                     if (imapConfig) imapConfig.style.display = 'block';
@@ -374,25 +372,23 @@ class EventManager {
                     if (imapConfig) imapConfig.style.display = 'none';
                 }
 
-                // Trigger SSO logic if Google or Microsoft is clicked
+                // Trigger SSO logic directly for Google/Microsoft
                 if (method === 'google') {
-                    // Google SSO logic
-                    if (typeof AuthManager !== 'undefined' && AuthManager.handleGoogleSSO) {
-                        AuthManager.handleGoogleSSO();
+                    try {
+                        await AuthManager.handleGoogleSSO();
+                    } catch (error) {
+                        console.error('Error in Google SSO:', error);
                     }
                 } else if (method === 'microsoft') {
-                    // Microsoft SSO logic
-                    if (typeof ipcRenderer !== 'undefined') {
-                        ipcRenderer.invoke('microsoft-sso').then((result: any) => {
-                            if (result.success) {
-                                // TODO: Store and use result.token for Microsoft Graph API
-                                console.log('Microsoft SSO successful! (Token received)');
-                            } else {
-                                console.error('Microsoft SSO failed:', result.error);
-                            }
-                        }).catch((error: any) => {
-                            console.error('Error in Microsoft SSO:', error);
-                        });
+                    try {
+                        const result: SSOResult = await ipcRenderer.invoke('microsoft-sso');
+                        if (result.success) {
+                            console.log('Microsoft SSO successful! (Token received)');
+                        } else {
+                            console.error('Microsoft SSO failed:', result.error);
+                        }
+                    } catch (error) {
+                        console.error('Error in Microsoft SSO:', error);
                     }
                 }
 
@@ -404,8 +400,9 @@ class EventManager {
         const googleOption = document.querySelector('.auth-option[data-method="google"]');
         if (googleOption) {
             googleOption.classList.add('selected');
+            if (imapConfig) imapConfig.style.display = 'none';
         }
-        
+
         console.log('Authentication method selection setup completed');
     }
 
@@ -1033,4 +1030,66 @@ class EventManager {
 // Export for module systems
 export { EventManager, type DOMElements, type SSOResult, type ConversationData };
 
-console.log('EventManager module loaded successfully'); 
+console.log('EventManager module loaded successfully');
+
+// Initialize conversation list keyboard navigation on startup
+initConversationListKeyboardNavigation();
+
+// Add arrow key navigation for conversation items in conversations-list
+export function initConversationListKeyboardNavigation() {
+    const conversationsList = document.getElementById('conversations-list');
+    if (!conversationsList) return;
+
+    let selectedIdx = -1;
+    let items = Array.from(conversationsList.querySelectorAll('.conversation-item'));
+
+    function updateSelection(newIdx: number) {
+        items.forEach((item, idx) => {
+            if (idx === newIdx) {
+                item.classList.add('selected');
+                item.scrollIntoView({ block: 'nearest' });
+                // Render the selected conversation in the message container
+                const conversationId = (item as HTMLElement).dataset.conversationId;
+                if (conversationId && typeof window !== 'undefined' && (window as any).eventManager) {
+                    (window as any).eventManager.selectConversation(conversationId);
+                } else if (item instanceof HTMLElement) {
+                    item.click();
+                }
+            } else {
+                item.classList.remove('selected');
+            }
+        });
+        selectedIdx = newIdx;
+    }
+
+    document.addEventListener('keydown', (e) => {
+        // Only activate if the conversations list is visible
+        if (!conversationsList.offsetParent) {
+            return;
+        }
+        items = Array.from(conversationsList.querySelectorAll('.conversation-item'));
+        if (items.length === 0) {
+            return;
+        }
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            let nextIdx = selectedIdx + 1;
+            if (nextIdx >= items.length) nextIdx = 0;
+            updateSelection(nextIdx);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            let prevIdx = selectedIdx - 1;
+            if (prevIdx < 0) prevIdx = items.length - 1;
+            updateSelection(prevIdx);
+        } else if (e.key === 'Enter' && selectedIdx >= 0) {
+            e.preventDefault();
+            (items[selectedIdx] as HTMLElement).click();
+        }
+    });
+
+    // Optionally, select the first item by default
+    if (items.length > 0) {
+        updateSelection(0);
+    }
+} 
