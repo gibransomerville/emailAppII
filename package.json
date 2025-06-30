@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "A modern email application built with Electron",
   "type": "module",
-  "main": "dist/main.js",
+  "main": "dist/core/main.js",
   "scripts": {
     "start": "npm run build:ts && electron .",
     "dev": "npm run build:ts && electronmon .",

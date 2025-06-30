@@ -12,6 +12,7 @@
     "declaration": true,
     "outDir": "./dist",
     "rootDir": "./src",
+    "preserveWatchOutput": true,
     "baseUrl": "./src",
     "paths": {
       "@core/*": ["core/*"],
