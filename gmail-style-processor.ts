@@ -5,6 +5,7 @@
  */
 
 import { Email } from './types/email.js';
+import { MarketingEmailDetector } from './marketing-email-detector.js';
 
 // Gmail-specific processing interfaces
 interface GmailProcessingOptions {
@@ -14,6 +15,7 @@ interface GmailProcessingOptions {
   processGmailTables: boolean;
   sanitizeGmailContent: boolean;
   enableGmailResponsive: boolean;
+  removeSignatures?: boolean; // New option for signature removal
 }
 
 interface GmailProcessedResult {
@@ -27,6 +29,24 @@ interface GmailProcessedResult {
     hasGmailStyles: boolean;
   };
 }
+
+// Signature detection patterns and helpers
+const SIGNATURE_SEPARATORS = [
+    /^-- ?$/m, // Standard signature separator
+];
+const SIGNATURE_PHRASES = [
+    'best regards', 'regards', 'kind regards', 'thanks', 'thank you', 'cheers',
+    'sent from my iphone', 'sent from my ipad', 'sent from my android',
+    'sent from my mobile', 'sent from my phone', 'sincerely', 'yours truly',
+    'yours faithfully', 'yours sincerely', 'warm regards', 'with appreciation',
+    'with gratitude', 'respectfully', 'cordially', 'take care', 'ciao',
+    'saludos', 'mit freundlichen grüßen', 'cordialement', 'merci', 'danke',
+    'gracias', 'obrigado', 'arigato', 'regards,', 'cheers,', 'thanks,',
+];
+const SIGNATURE_HTML_CLASSES = [
+    'gmail_signature', 'signature', 'outlook-signature', 'msoSignature',
+    'email-signature', 'sig', 'mail-signature', 'footer-signature',
+];
 
 class GmailStyleProcessor {
   private gmailPatterns = {
@@ -57,6 +77,8 @@ class GmailStyleProcessor {
     ]
   };
 
+  private marketingDetector = new MarketingEmailDetector();
+
   /**
    * Main Gmail-style processing entry point
    * @param email - Email object to process
@@ -71,6 +93,7 @@ class GmailStyleProcessor {
       processGmailTables: true,
       sanitizeGmailContent: true,
       enableGmailResponsive: true,
+      removeSignatures: true, // Enable signature removal by default
       ...options
     };
 
@@ -86,6 +109,29 @@ class GmailStyleProcessor {
     // Step 1: Extract content with Gmail priority
     let content = this.extractGmailContent(email);
     processingSteps.push('Extracted Gmail-style content');
+
+    // Step 1.5: Remove signatures from non-marketing emails
+    if (fullOptions.removeSignatures) {
+      const marketingTag = this.marketingDetector.detectMarketingEmail(email);
+      const isMarketing = marketingTag.isMarketing;
+      
+      if (!isMarketing) {
+        const originalContent = content;
+        const isHtmlContent = this.isHtmlContent(content);
+        
+        if (isHtmlContent) {
+          content = this.removeSignatureFromHtml(content);
+        } else {
+          content = this.removeSignatureFromPlainText(content);
+        }
+        
+        if (content !== originalContent) {
+          processingSteps.push(`Signature block removed from ${isHtmlContent ? 'HTML' : 'plain text'} (non-marketing email)`);
+        }
+      } else {
+        processingSteps.push('Signature removal skipped (marketing email detected)');
+      }
+    }
 
     // Step 2: Detect Gmail-specific features
     gmailFeatures.hasGmailWrappers = this.hasGmailWrappers(content);
@@ -306,15 +352,20 @@ class GmailStyleProcessor {
       '</table></div>'
     );
 
-    // Gmail table cell approach: Ensure proper display
+    // Gmail table cell approach: Only add styles if none exist
     processed = processed.replace(
       /<td([^>]*?)>/gi,
       (match, attributes) => {
-        if (!attributes.includes('style=')) {
+        // Only add Gmail styles if no style attribute exists AND no other styling attributes
+        if (!attributes.includes('style=') && 
+            !attributes.includes('width=') && 
+            !attributes.includes('valign=') && 
+            !attributes.includes('align=') && 
+            !attributes.includes('bgcolor=') && 
+            !attributes.includes('class=')) {
           return `<td${attributes} style="display: table-cell; vertical-align: top;">`;
-        } else if (!attributes.includes('display:') && !attributes.includes('vertical-align:')) {
-          return match.replace('style="', 'style="display: table-cell; vertical-align: top; ');
         }
+        // If any styling attributes exist, preserve them completely - don't modify
         return match;
       }
     );
@@ -323,31 +374,27 @@ class GmailStyleProcessor {
   }
 
   /**
-   * Apply Gmail styling patterns
+   * Apply Gmail styling patterns - FIXED to preserve original inline styles
    * @param content - HTML content
-   * @returns Content with Gmail styling
+   * @returns Content with Gmail styling (only when no inline styles exist)
    */
   private applyGmailStyling(content: string): string {
-    // Apply Gmail font, size, line-height, and margin to every block element
+    // FIXED: Only apply Gmail styles when no inline styles exist
+    // This preserves original email styling instead of overriding it
     return content.replace(
       /<(div|td|p|span|table|th|tr|tbody|thead|tfoot)([^>]*)>/gi,
       (match, tag, attrs) => {
-        let style = 'font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4;';
-        // Add Gmail-like margin to block elements
-        if (['div','td','p','table','th','tr','tbody','thead','tfoot'].includes(tag)) {
-          style += ' margin: 0 0 16px 0;';
-        }
+        // Only add Gmail styles if no style attribute exists
         if (!/style=/.test(attrs)) {
+          let style = 'font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4;';
+          // Add Gmail-like margin to block elements
+          if (['div','td','p','table','th','tr','tbody','thead','tfoot'].includes(tag)) {
+            style += ' margin: 0 0 16px 0;';
+          }
           return `<${tag}${attrs} style="${style}">`;
         }
-        // If style exists, append Gmail styles if not present
-        return match.replace(/style="([^"]*)"/, (_, s) => {
-          if (!/font-family:/.test(s)) s += ' font-family: Arial, sans-serif;';
-          if (!/font-size:/.test(s)) s += ' font-size: 13px;';
-          if (!/line-height:/.test(s)) s += ' line-height: 1.4;';
-          if (['div','td','p','table','th','tr','tbody','thead','tfoot'].includes(tag) && !/margin:/.test(s)) s += ' margin: 0 0 16px 0;';
-          return `style="${s.trim()}"`;
-        });
+        // If style already exists, preserve it completely - don't override
+        return match;
       }
     );
   }
@@ -427,6 +474,79 @@ class GmailStyleProcessor {
         ${content}
       </div>
     `;
+  }
+
+  /**
+   * Check if content is HTML
+   * @param content - Content to check
+   * @returns True if content appears to be HTML
+   */
+  private isHtmlContent(content: string): boolean {
+    return /<[^>]+>/i.test(content);
+  }
+
+  /**
+   * Remove signature from plain text content
+   * @param text - Plain text content
+   * @returns Text with signature removed
+   */
+  private removeSignatureFromPlainText(text: string): string {
+    const lines = text.split('\n');
+    let cutIndex = lines.length;
+    
+    // Check for signature separator
+    for (let i = 0; i < lines.length; i++) {
+      if (SIGNATURE_SEPARATORS.some(sep => sep.test(lines[i]))) {
+        cutIndex = i;
+        break;
+      }
+    }
+    
+    // Check for signature phrases (case-insensitive)
+    for (let i = 0; i < lines.length; i++) {
+      const lower = lines[i].toLowerCase().trim();
+      if (SIGNATURE_PHRASES.some(phrase => lower.startsWith(phrase))) {
+        cutIndex = Math.min(cutIndex, i);
+        break;
+      }
+    }
+    
+    return lines.slice(0, cutIndex).join('\n').trim();
+  }
+
+  /**
+   * Remove signature from HTML content
+   * @param html - HTML content
+   * @returns HTML with signature removed
+   */
+  private removeSignatureFromHtml(html: string): string {
+    // Remove signature blocks by class or id
+    let doc: Document;
+    try {
+      doc = new DOMParser().parseFromString(html, 'text/html');
+    } catch {
+      return html;
+    }
+    
+    let removed = false;
+    SIGNATURE_HTML_CLASSES.forEach(cls => {
+      // By class
+      doc.querySelectorAll(`.${cls}`).forEach(el => { el.remove(); removed = true; });
+      // By id
+      doc.querySelectorAll(`#${cls}`).forEach(el => { el.remove(); removed = true; });
+    });
+    
+    // Remove <hr> followed by short block (common in Outlook)
+    doc.querySelectorAll('hr').forEach(hr => {
+      const next = hr.nextElementSibling;
+      if (next && next.textContent && next.textContent.length < 300) {
+        hr.remove();
+        next.remove();
+        removed = true;
+      }
+    });
+    
+    return removed ? doc.body.innerHTML : html;
   }
 }
 

@@ -22,6 +22,8 @@ declare global {
   const EMAIL_PARSING_CONFIG: EmailParsingConfig;
   const DOMPurify: {
     sanitize(dirty: string, config?: any): string;
+    addHook(hook: string, callback: (node: Node) => void): void;
+    removeHooks(hook: string): void;
   };
 }
 
@@ -40,7 +42,29 @@ export class SafeHTML {
         const config = { ...DOMPURIFY_CONFIG.email, ...options };
         
         try {
+            // Add custom hook to preserve style attributes exactly as they are
+            DOMPurify.addHook('beforeSanitizeAttributes', (node) => {
+                // Store original style attributes to prevent corruption
+                const element = node as HTMLElement;
+                if (element.hasAttribute && element.hasAttribute('style')) {
+                    (element as any)._originalStyle = element.getAttribute('style');
+                }
+            });
+            
+            DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+                // Restore original style attributes if they were corrupted
+                const element = node as HTMLElement;
+                if ((element as any)._originalStyle) {
+                    element.setAttribute('style', (element as any)._originalStyle);
+                    delete (element as any)._originalStyle;
+                }
+            });
+            
             const sanitized = DOMPurify.sanitize(html, config);
+            
+            // Remove the hooks after sanitization
+            DOMPurify.removeHooks('beforeSanitizeAttributes');
+            DOMPurify.removeHooks('afterSanitizeAttributes');
             
             if (EMAIL_PARSING_CONFIG.debugParsing) {
                 console.log('Email HTML sanitized:', {

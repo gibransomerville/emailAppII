@@ -450,10 +450,29 @@ export class IMAPEmailManager {
     const formattedTime = this.formatMessageTime(date);
     const unreadCount = conversation.emails.filter(e => !e.read).length;
 
+    // Extract display name from latestEmail.from
+    let displayName = 'Unknown';
+    if (latestEmail && latestEmail.from) {
+      if (typeof latestEmail.from === 'object' && latestEmail.from.name) {
+        displayName = latestEmail.from.name;
+      } else if (typeof latestEmail.from === 'string') {
+        const fromStr = latestEmail.from as string;
+        const match = fromStr.match(/^(.+?)\s*<(.+?)>$/);
+        if (match) {
+          displayName = match[1].trim();
+        } else {
+          displayName = fromStr;
+        }
+      }
+    }
+
+    // Remove any surrounding quotes from displayName
+    displayName = displayName.replace(/^['"]+|['"]+$/g, '');
+
     const conversationHTML = `
       <div class="conversation-info">
         <div class="conversation-content">
-          <strong>${this.escapeHtml(conversation.participants[0] || 'Unknown')}</strong><br>
+          <strong>${this.escapeHtml(displayName)}</strong><br>
           <span>${this.escapeHtml(latestEmail.subject || 'No Subject')}</span>
         </div>
       </div>

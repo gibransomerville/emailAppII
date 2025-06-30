@@ -898,7 +898,7 @@ class EventManager {
         const formattedDate = this.formatEmailDate(date);
         
         // Use EmailRenderer to process and render the email content
-        let contentHtml = this.emailRenderer.processEmailHTML(email);
+        let contentHtml = this.emailRenderer.createExpandedContent(email).innerHTML;
         
         emailElement.innerHTML = `
             <div class="email-header">
@@ -1040,7 +1040,7 @@ export function initConversationListKeyboardNavigation() {
     const conversationsList = document.getElementById('conversations-list');
     if (!conversationsList) return;
 
-    let selectedIdx = -1;
+    let selectedIdx = 0;
     let items = Array.from(conversationsList.querySelectorAll('.conversation-item'));
 
     function updateSelection(newIdx: number) {
@@ -1062,6 +1062,11 @@ export function initConversationListKeyboardNavigation() {
         selectedIdx = newIdx;
     }
 
+    // Select the first item by default if available
+    if (items.length > 0) {
+        updateSelection(0);
+    }
+
     document.addEventListener('keydown', (e) => {
         // Only activate if the conversations list is visible
         if (!conversationsList.offsetParent) {
@@ -1075,21 +1080,20 @@ export function initConversationListKeyboardNavigation() {
         if (e.key === 'ArrowDown') {
             e.preventDefault();
             let nextIdx = selectedIdx + 1;
-            if (nextIdx >= items.length) nextIdx = 0;
-            updateSelection(nextIdx);
+            if (nextIdx < items.length) {
+                updateSelection(nextIdx);
+            }
+            // Do nothing if at the last item
         } else if (e.key === 'ArrowUp') {
             e.preventDefault();
             let prevIdx = selectedIdx - 1;
-            if (prevIdx < 0) prevIdx = items.length - 1;
-            updateSelection(prevIdx);
+            if (prevIdx >= 0) {
+                updateSelection(prevIdx);
+            }
+            // Do nothing if at the first item
         } else if (e.key === 'Enter' && selectedIdx >= 0) {
             e.preventDefault();
             (items[selectedIdx] as HTMLElement).click();
         }
     });
-
-    // Optionally, select the first item by default
-    if (items.length > 0) {
-        updateSelection(0);
-    }
 } 
