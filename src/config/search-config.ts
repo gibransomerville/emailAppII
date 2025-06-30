@@ -9,7 +9,7 @@ import type {
   SearchStats,
   // SearchResult,
   IndexStats
-} from './types/config';
+} from '../../types/config';
 
 export const SEARCH_CONFIG: SearchConfigComplete = {
     // Search engine settings

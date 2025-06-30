@@ -25,8 +25,8 @@ if (typeof window !== 'undefined' && (window as any).require) {
   };
 }
 
-import { EmailConfig } from './types/config.js';
-import { Email } from './types/email.js';
+import { EmailConfig } from '../../types/config';
+import { Email } from '../../types/email';
 
 interface EmailData {
     to: string;

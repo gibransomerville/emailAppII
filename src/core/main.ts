@@ -5,7 +5,7 @@ import { URLSearchParams } from 'url';
 import * as http from 'http';
 import * as net from 'net';
 import { fileURLToPath } from 'url';
-import { OAUTH_CONFIG } from './config.js';
+import { OAUTH_CONFIG } from '../config/config.js';
 
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -44,7 +44,7 @@ function createWindow(): void {
     show: false
   });
 
-  mainWindow.loadFile('index.html');
+      mainWindow.loadFile('public/index.html');
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();

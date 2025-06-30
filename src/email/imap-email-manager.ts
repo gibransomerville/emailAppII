@@ -14,11 +14,11 @@
  * @version 1.0.0
  */
 
-import { UIThemeManager } from './ui-theme-manager.js';
-import { EventManager } from './event-manager.js';
-import { EmailManager } from './email-manager.js';
-import { getSearchManager } from './search-manager.js';
-import type { Email, EmailConversation, EmailAddress } from './types/email.js';
+import { UIThemeManager } from '../ui/ui-theme-manager.js';
+import { EventManager } from '../managers/event-manager.js';
+import { EmailManager } from '../email/email-manager.js';
+import { getSearchManager } from '../managers/search-manager.js';
+import type { Email, EmailConversation, EmailAddress } from '../../types/email';
 
 // Get ipcRenderer for Gmail API communication
 let ipcRenderer: any;
@@ -34,7 +34,7 @@ if (typeof window !== 'undefined' && (window as any).require) {
   };
 }
 
-// import type { EmailConfig, IMAPConfig } from './types/config';
+// import type { EmailConfig, IMAPConfig } from '../../types/config';
 
 
 

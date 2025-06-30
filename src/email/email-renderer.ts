@@ -3,9 +3,9 @@
  * Integrated with EmailHtmlEngine for advanced HTML processing
  */
 
-import { Email, EmailAddress } from './types/email.js';
-import { GmailStyleProcessor } from './gmail-style-processor.js';
-import { emailProcessingConfig } from './email-processing-config.js';
+import { Email, EmailAddress } from '../../types/email';
+import { GmailStyleProcessor } from '../email/gmail-style-processor.js';
+import { emailProcessingConfig } from '../config/email-processing-config.js';
 
 // Email rendering interfaces
 interface EmailCompatibleHtmlOptions {

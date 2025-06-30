@@ -3,7 +3,7 @@
  * Simple utility to detect and tag marketing emails with visual indicators
  */
 
-import { Email } from './types/email.js';
+import { Email } from '../../types/email';
 
 export interface MarketingTag {
     isMarketing: boolean;

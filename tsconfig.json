@@ -1,45 +1,48 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "module": "ES2020",
     "moduleResolution": "node",
-    "moduleDetection": "force",
-    "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "forceConsistentCasingInFileNames": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "outDir": "./dist",
-    "rootDir": "./",
-    "sourceMap": true,
-    "declaration": false,
-    "removeComments": false,
+    "esModuleInterop": true,
+    "allowUmdGlobalAccess": true,
     "strict": true,
-    "noImplicitAny": true,
-    "strictNullChecks": true,
-    "strictFunctionTypes": true,
-    "noImplicitReturns": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "incremental": true,
-    "tsBuildInfoFile": "./dist/.tsbuildinfo",
-    "allowJs": false,
-    "checkJs": false,
-    "types": ["node", "electron"]
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "baseUrl": "./src",
+    "paths": {
+      "@core/*": ["core/*"],
+      "@ui/*": ["ui/*"],
+      "@email/*": ["email/*"],
+      "@auth/*": ["auth/*"],
+      "@config/*": ["config/*"],
+      "@utils/*": ["utils/*"],
+      "@managers/*": ["managers/*"],
+      "@types/*": ["../types/*"]
+    },
+    "lib": [
+      "ES2020",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "node"
+    ],
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": false,
+    "jsx": "preserve"
   },
   "include": [
-    "*.ts",
+    "src/**/*",
     "types/**/*"
   ],
   "exclude": [
     "node_modules",
     "dist",
-    "**/*.test.ts",
-    "**/*.spec.ts",
-    "vite.config.ts"
-  ],
-  "ts-node": {
-    "esm": true
-  }
+    "release"
+  ]
 } 

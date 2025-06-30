@@ -4,7 +4,7 @@
  * Dependencies: EMAIL_PARSING_CONFIG (loaded globally), simpleParser (mailparser)
  */
 
-import { Email, Attachment, EmailAddress, EmailSource } from './types/email.js';
+import { Email, Attachment, EmailAddress, EmailSource } from '../../types/email';
 
 // Email parsing interfaces
 interface RawEmailData {

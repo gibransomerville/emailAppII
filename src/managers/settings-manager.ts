@@ -4,7 +4,7 @@
  * Dependencies: ipcRenderer (electron), global variables (emailConfig, settingsModal, etc.)
  */
 
-import type { EmailConfig } from './types/config';
+import type { EmailConfig } from '../../types/config';
 
 /**
  * Settings form data interface

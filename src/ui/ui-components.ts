@@ -10,9 +10,9 @@
 //   SearchHighlight,
 //   HighlightMatch
 // } from './types/ui';
-import type { EmailConversation, Email } from './types/email.js';
-import type { SearchUIState } from './types/ui.js';
-// import type { Email as EmailType, EmailConversation, EmailAddress } from './types/email';
+import type { EmailConversation, Email } from '../../types/email';
+import type { SearchUIState } from '../../types/ui';
+// import type { Email as EmailType, EmailConversation, EmailAddress } from '../../types/email';
 
 /**
  * Search UI state interface

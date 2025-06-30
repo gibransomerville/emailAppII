@@ -3,7 +3,7 @@
  * Provides user interface for switching between email processing modes
  */
 
-import { emailProcessingConfig, type EmailProcessingConfig } from './email-processing-config.js';
+import { emailProcessingConfig, type EmailProcessingConfig } from '../config/email-processing-config.js';
 
 export class EmailProcessingUI {
   private container: HTMLElement | null = null;

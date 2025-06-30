@@ -17,13 +17,13 @@
  * @version 1.0.0
  */
 
-import { Email } from './types/email.js';
-import { AuthManager } from './auth-manager.js';
-import { uiThemeManager } from './ui-theme-manager.js';
-import { EmailComposer } from './email-composer.js';
-import { IMAPEmailManager } from './imap-email-manager.js';
-import { EmailRenderer } from './email-renderer.js';
-import { MarketingEmailDetector } from './marketing-email-detector.js';
+import { Email } from '../../types/email';
+import { AuthManager } from '../auth/auth-manager.js';
+import { uiThemeManager } from '../ui/ui-theme-manager.js';
+import { EmailComposer } from '../email/email-composer.js';
+import { IMAPEmailManager } from '../email/imap-email-manager.js';
+import { EmailRenderer } from '../email/email-renderer.js';
+import { MarketingEmailDetector } from '../email/marketing-email-detector.js';
 
 // Import Electron modules conditionally for browser compatibility
 let ipcRenderer: any;

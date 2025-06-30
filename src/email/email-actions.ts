@@ -4,7 +4,7 @@
  * Dependencies: EmailRenderer, SafeHTML, global variables (conversations, emails, emailConfig, etc.)
  */
 
-import type { Email, EmailAddress, EmailConversation } from './types/email.js';
+import type { Email, EmailAddress, EmailConversation } from '../../types/email';
 
 /**
  * Email action types

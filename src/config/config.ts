@@ -8,7 +8,7 @@ import type {
   DOMPurifyConfig, 
   OAuthConfig, 
   AppConfig 
-} from './types/config';
+} from '../../types/config';
 
 // Configuration for email parsing
 export const EMAIL_PARSING_CONFIG: EmailParsingConfig = {

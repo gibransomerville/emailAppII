@@ -2,8 +2,8 @@
 // Coordinates search functionality across local and IMAP search engines
 
 // Import search engines
-import { EmailSearchEngine, IMAPSearchEngine } from './search-engine.js';
-import { Email } from './types/email.js';
+import { EmailSearchEngine, IMAPSearchEngine } from '../managers/search-engine.js';
+import { Email } from '../../types/email';
 import { 
     SearchOptions, 
     SearchResult, 
@@ -11,7 +11,7 @@ import {
     SearchSuggestion,
     SearchStats,
     // IMAPConfig
-} from './types/config';
+} from '../../types/config';
 
 interface IMAPSearchResult {
     uids: number[];

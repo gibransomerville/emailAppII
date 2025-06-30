@@ -4,8 +4,8 @@
  * Based on Gmail's actual email rendering behavior
  */
 
-import { Email } from './types/email.js';
-import { MarketingEmailDetector } from './marketing-email-detector.js';
+import { Email } from '../../types/email';
+import { MarketingEmailDetector } from '../email/marketing-email-detector.js';
 
 // Gmail-specific processing interfaces
 interface GmailProcessingOptions {

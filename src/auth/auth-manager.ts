@@ -5,9 +5,9 @@
  */
 
 // Removed googleapis import - using IPC communication instead
-import { UIThemeManager } from './ui-theme-manager.js';
-import { EventManager } from './event-manager.js';
-import { IMAPEmailManager } from './imap-email-manager.js';
+import { UIThemeManager } from '../ui/ui-theme-manager.js';
+import { EventManager } from '../managers/event-manager.js';
+import { IMAPEmailManager } from '../email/imap-email-manager.js';
 import type { IpcRenderer } from 'electron';
 
 // Get ipcRenderer from window

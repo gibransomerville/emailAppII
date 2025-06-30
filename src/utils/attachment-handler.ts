@@ -11,7 +11,7 @@
  * @version 1.0.0
  */
 
-import { Attachment } from './types/email';
+import { Attachment } from '../../types/email';
 
 // File type categories
 type FileTypeCategory = 'image' | 'text' | 'pdf' | 'video' | 'audio' | 'document' | 'archive' | 'unknown';

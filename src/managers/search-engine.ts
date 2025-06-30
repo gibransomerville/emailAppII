@@ -3,7 +3,7 @@
  * Provides comprehensive email search functionality with local indexing and IMAP support
  */
 
-import { Email, Attachment } from './types/email.js';
+import { Email, Attachment } from '../../types/email';
 import { 
     SearchResult, 
     SearchHistoryItem, 
@@ -14,7 +14,7 @@ import {
     SearchableContent,
     IMAPSearchCriteria,
     IMAPConfig
-} from './types/config';
+} from '../../types/config';
 
 interface EmailField {
     text?: string;

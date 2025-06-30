@@ -9,8 +9,8 @@ import type {
   SafeHTMLOptions, 
   SafeHTMLTemplateData, 
   SafeHTMLValidationResult 
-} from './types/ui';
-import type { DOMPurifyConfig, EmailParsingConfig } from './types/config';
+} from '../../types/ui';
+import type { DOMPurifyConfig, EmailParsingConfig } from '../../types/config';
 
 // Dependencies are loaded globally via script tags and config modules:
 // - DOMPurify: loaded via CDN in index.html

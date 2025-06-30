@@ -4,7 +4,7 @@
  * Dependencies: Email types, EmailManager
  */
 
-import { Email } from './types/email.js';
+import { Email } from '../../types/email';
 
 export interface EmailFilter {
     id: string;
