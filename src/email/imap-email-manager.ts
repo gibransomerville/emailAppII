@@ -238,12 +238,30 @@ export class IMAPEmailManager {
       // --- Strictly Linear Email Processing ---
       const rawEmails = await this.fetchAllRawEmails();
       // 1. Standardize each raw email
-      const standardizedEmails = rawEmails.map((raw: any) =>
-        this.emailManager.standardizeEmailObject(raw, this.googleAuth ? 'gmail-api' : 'imap')
+      const standardizedEmails = rawEmails.map((raw: any) => {
+        const email = this.emailManager.standardizeEmailObject(raw, this.googleAuth ? 'gmail-api' : 'imap');
+        // Ensure all attachments are standardized
+        if (email.attachments && Array.isArray(email.attachments)) {
+          email.attachments = this.emailManager.standardizeAttachments(email.attachments, email.messageId);
+        }
+        return email;
+      });
+      
+      // 2. Enhance emails with accurate attachment information (hybrid detection)
+      console.log('Enhancing emails with accurate attachment information...');
+      const enhancedEmails = await Promise.all(
+        standardizedEmails.map(async (email: Email) => {
+          if (this.googleAuth && (!email.attachments || email.attachments.length === 0)) {
+            // Use hybrid detection for Gmail emails that appear to have no attachments
+            return await this.emailManager.enhanceEmailAttachments(email, 'gmail');
+          }
+          return email;
+        })
       );
-      // 2. Process HTML/Text for each standardized email
+
+      // 3. Process HTML/Text for each enhanced email
       const htmlEngine = (window as any).EmailHtmlEngine || (globalThis as any).EmailHtmlEngine;
-      this.emails = standardizedEmails.map((email: any) => {
+      this.emails = enhancedEmails.map((email: any) => {
         if (htmlEngine && typeof htmlEngine.processEmailHtml === 'function') {
           const processed = htmlEngine.processEmailHtml(email);
           // Store processed HTML for direct use in UI
@@ -251,29 +269,29 @@ export class IMAPEmailManager {
         }
         return email;
       });
-      // 3. Group emails into conversations
+      // 4. Group emails into conversations
       console.log('Grouping emails into conversations...');
       this.conversations = this.basicEmailGrouping(this.emails);
-      // 4. Sync state immediately to prevent race conditions
+      // 5. Sync state immediately to prevent race conditions
       this.syncGlobalState();
-      // 5. Build search index using the singleton search manager
+      // 6. Build search index using the singleton search manager
       const searchManager = getSearchManager();
       if (searchManager && searchManager.buildSearchIndex) {
         searchManager.buildSearchIndex(this.emails);
       }
-      // 6. Initialize IMAP search engine if using IMAP
+      // 7. Initialize IMAP search engine if using IMAP
       if (this.emailConfig && !this.googleAuth && (window as any).IMAPSearchEngine) {
         (window as any).imapSearchEngine = new (window as any).IMAPSearchEngine(this.emailConfig);
       }
-      // 7. Log parsing statistics
+      // 8. Log parsing statistics
       if (this.emails.length > 0) {
         this.emailManager.logEmailParsingStats(this.emails);
       }
-      // 8. Debug email rendering issues
+      // 9. Debug email rendering issues
       if (typeof (window as any).debugEmailRenderingIssues === 'function') {
         (window as any).debugEmailRenderingIssues();
       }
-      // 9. Ensure conversations list exists before rendering
+      // 10. Ensure conversations list exists before rendering
       const conversationsList = document.getElementById('conversations-list');
       if (!conversationsList) {
         console.error('Conversations list element not found, delaying render');
@@ -606,4 +624,72 @@ export class IMAPEmailManager {
   // waitForGlobalState method removed - functionality moved to email-actions.ts
 }
 
-console.log('IMAPEmailManager module loaded successfully'); 
+console.log('IMAPEmailManager module loaded successfully');
+
+// Unit test for IMAP attachment standardization
+if (typeof window !== 'undefined') {
+  (window as any).testIMAPAttachmentStandardization = () => {
+    const emailManager = new (window as any).EmailManager({});
+    const imapEmailManager = new (IMAPEmailManager as any)(null, null, emailManager);
+    const testRawEmails = [
+      {
+        id: '1',
+        attachments: [
+          { filename: 'imap1.txt', contentType: 'text/plain', size: 100 },
+          { name: 'imap2.pdf', mimeType: 'application/pdf', size: 200 }
+        ]
+      }
+    ];
+    const standardizedEmails = testRawEmails.map((raw: any) => {
+      const email = emailManager.standardizeEmailObject(raw, 'imap');
+      if (email.attachments && Array.isArray(email.attachments)) {
+        email.attachments = emailManager.standardizeAttachments(email.attachments, email.messageId);
+      }
+      return email;
+    });
+    console.assert(standardizedEmails[0].attachments?.length === 2, 'Should have 2 attachments');
+    console.assert(standardizedEmails[0].attachments?.[0].filename === 'imap1.txt', 'First attachment filename');
+    console.assert(standardizedEmails[0].attachments?.[1].filename === 'imap2.pdf', 'Second attachment filename');
+    console.log('✅ testIMAPAttachmentStandardization passed', standardizedEmails);
+    return standardizedEmails;
+  };
+
+  (window as any).IMAPEmailManager = IMAPEmailManager;
+
+  // Add a global debug function for Gmail raw attachment parsing
+  (window as any).debugGmailRawAttachments = async (messageId: string) => {
+    try {
+      if (!messageId) {
+        console.error('Please provide a Gmail message ID');
+        return;
+      }
+      // Use IPC to fetch the raw message from Gmail
+      const googleAuth = (window as any).googleAuth || (window as any).storedGoogleToken;
+      if (!googleAuth) {
+        console.error('No Google auth token available in window context');
+        return;
+      }
+      const result = await ipcRenderer.invoke('fetch-gmail-raw-message', { messageId, auth: googleAuth });
+      if (!result.success) {
+        console.error('Failed to fetch raw Gmail message:', result.error);
+        return;
+      }
+      const rawBase64 = result.raw;
+      if (!rawBase64) {
+        console.error('No raw data returned for message');
+        return;
+      }
+      // Use IPC to parse the raw email in the main process
+      const parseResult = await ipcRenderer.invoke('parse-raw-email', rawBase64);
+      if (!parseResult.success) {
+        console.error('Failed to parse raw email:', parseResult.error);
+        return;
+      }
+      console.log('[DEBUG] Parsed email:', parseResult.parsed);
+      console.log('[DEBUG] Parsed attachments:', parseResult.parsed.attachments);
+      return parseResult.parsed;
+    } catch (e) {
+      console.error('Error in debugGmailRawAttachments:', e);
+    }
+  };
+} 

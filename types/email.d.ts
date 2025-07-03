@@ -43,18 +43,36 @@ export interface Email {
 /**
  * Email attachment interface
  */
-export interface EmailAttachment {
+export interface Attachment {
+  name: string;
   filename: string;
+  url: string;
   contentType: string;
+  contentTypeParam?: string;
   size: number;
-  content?: Buffer | string;
+  isInline: boolean;
+  isTemporary: boolean;
+  cloudInfo?: {
+    provider: string;
+    accountKey: string;
+    partHeaderData: string;
+  };
   contentId?: string;
+  charset?: string;
+  macType?: string;
+  macCreator?: string;
+  description?: string;
+  disposition?: string;
+  msgUri?: string;
+  urlCharset?: string;
+  content?: Buffer | string;
   encoding?: string;
   attachmentId?: string;
+  messageId?: string;
 }
 
-// Export Attachment as alias for EmailAttachment for backward compatibility
-export type Attachment = EmailAttachment;
+// Use Attachment as the canonical type for all attachments
+export type EmailAttachment = Attachment;
 
 /**
  * Attachment handling types

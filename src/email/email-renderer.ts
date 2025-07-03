@@ -30,6 +30,84 @@ class EmailRenderer {
     constructor() {
         this.gmailProcessor = new GmailStyleProcessor();
         console.log('EmailRenderer: Initialized with GmailStyleProcessor');
+        
+        // Set up event delegation for attachment buttons
+        this.setupAttachmentEventListeners();
+    }
+
+    /**
+     * Set up event delegation for attachment buttons
+     */
+    setupAttachmentEventListeners(): void {
+        // Remove existing listener if it exists
+        document.removeEventListener('click', this.handleAttachmentClick);
+        
+        // Add event delegation for attachment buttons
+        document.addEventListener('click', this.handleAttachmentClick.bind(this));
+    }
+
+    /**
+     * Handle attachment button clicks
+     */
+    private handleAttachmentClick(event: Event): void {
+        const target = event.target as HTMLElement;
+        
+        // Check if clicked element is an attachment button
+        if (!target.classList.contains('attachment-btn')) {
+            return;
+        }
+        
+        const action = target.getAttribute('data-action');
+        const attachmentIndex = target.getAttribute('data-attachment-index');
+        
+        if (!action || attachmentIndex === null) {
+            return;
+        }
+        
+        // Find the attachment item container
+        const attachmentItem = target.closest('.attachment-item');
+        if (!attachmentItem) {
+            return;
+        }
+        
+        // Get attachment data from the container
+        const attachmentDataStr = attachmentItem.getAttribute('data-attachment');
+        if (!attachmentDataStr) {
+            return;
+        }
+        
+        try {
+            const attachmentData = JSON.parse(attachmentDataStr);
+            
+            // Call the appropriate AttachmentHandler method
+            if ((window as any).AttachmentHandler) {
+                (async () => {
+                    try {
+                        switch (action) {
+                            case 'download':
+                                await (window as any).AttachmentHandler.downloadAttachment(attachmentData);
+                                break;
+                            case 'preview':
+                                await (window as any).AttachmentHandler.previewAttachment(attachmentData);
+                                break;
+                            case 'openInCloud':
+                                (window as any).AttachmentHandler.openInCloud(attachmentData);
+                                break;
+                            case 'delete':
+                                (window as any).AttachmentHandler.deleteAttachment(attachmentData);
+                                break;
+                        }
+                    } catch (error) {
+                        console.error('Error handling attachment action:', error);
+                        if (typeof (window as any).showNotification !== 'undefined') {
+                            (window as any).showNotification('Failed to perform attachment action: ' + (error as Error).message, 'error');
+                        }
+                    }
+                })();
+            }
+        } catch (error) {
+            console.error('Error handling attachment click:', error);
+        }
     }
 
     /**
@@ -340,9 +418,12 @@ class EmailRenderer {
      * @returns Expanded content element
      */
     createGmailExpandedContent(email: Email, _options: any = {}): HTMLElement {
+        // Debug: Log the email object and its attachments
+        console.log('[DEBUG] Rendering email in createGmailExpandedContent:', email);
+        console.log('[DEBUG] Attachments:', email.attachments);
+        (window as any).lastRenderedEmail = email;
         const expandedDiv = document.createElement('div');
         expandedDiv.className = 'gmail-expanded-content';
-        
         try {
             // Use Gmail-style processor for authentic Gmail experience
             const gmailOptions = {
@@ -353,38 +434,32 @@ class EmailRenderer {
                 sanitizeGmailContent: true,
                 enableGmailResponsive: true
             };
-            
             const gmailResult = this.gmailProcessor.processGmailStyle(email, gmailOptions);
-            
             // Check if the processed result is the 'No content available' message
             const isNoHtmlContent = gmailResult.content && gmailResult.content.includes('No content available');
-            
+            let contentHtml = '';
             if (isNoHtmlContent) {
                 // Try to render plain text fallback
                 let plainText = (email as any).text || email.bodyText || email.body || email.snippet || '';
                 plainText = plainText.trim();
-                let content = '';
                 if (plainText) {
-                    content = this.convertPlainTextToHtml(plainText);
+                    contentHtml = this.convertPlainTextToHtml(plainText);
                 } else {
-                    content = '<em>No content available</em>';
+                    contentHtml = '<em>No content available</em>';
                 }
-                expandedDiv.innerHTML = `
-                    <div class="email-content">
-                        <div class="email-content-wrapper">
-                            ${content}
-                        </div>
-                    </div>
-                `;
             } else {
-                // Create the expanded content with Gmail-processed HTML
-                expandedDiv.innerHTML = `
-                    <div class="email-content">
-                        ${gmailResult.content}
-                    </div>
-                `;
+                contentHtml = gmailResult.content;
             }
-            
+            // Render attachments below the content
+            const attachmentsHtml = this.renderAttachmentList(email.attachments || []);
+            expandedDiv.innerHTML = `
+                <div class="email-content">
+                    ${contentHtml}
+                </div>
+                <div class="email-attachments">
+                    ${attachmentsHtml}
+                </div>
+            `;
             // Log Gmail processing information for debugging
             if (gmailResult.warnings.length > 0) {
                 console.warn('Gmail-style processing warnings:', gmailResult.warnings);
@@ -395,7 +470,6 @@ class EmailRenderer {
             if (gmailResult.gmailFeatures) {
                 console.log('Gmail features detected:', gmailResult.gmailFeatures);
             }
-            
         } catch (error) {
             console.error('Error processing email with Gmail-style processor:', error);
             // Fallback to standard HTML engine
@@ -428,7 +502,6 @@ class EmailRenderer {
                 `;
             }
         }
-        
         return expandedDiv;
     }
 
@@ -505,6 +578,79 @@ class EmailRenderer {
         html = html.replace(/<p><br><\/p>/g, '<br>');
         return html;
     }
+
+    /**
+     * Render a list of attachments with metadata and actions
+     */
+    renderAttachmentList(attachments: any[]): string {
+        // Fallback HTML escape function
+        const escapeHtml = (str: string) => {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        };
+        const safeEscape = (window as any).SafeHTML && typeof (window as any).SafeHTML.escape === 'function'
+            ? (window as any).SafeHTML.escape
+            : escapeHtml;
+        if (!attachments || attachments.length === 0) {
+            return '<div class="no-attachments">No attachments</div>';
+        }
+        return `
+            <div class="attachment-list">
+                ${attachments.map((att, index) => {
+                    const safeName = safeEscape(att.name || att.filename || 'attachment');
+                    const sizeStr = att.size ? `(${(att.size/1024).toFixed(1)} KB)` : '';
+                    const icon = att.contentType && att.contentType.startsWith('image/') ? '🖼️' : '📎';
+                    
+                    // Store attachment data in data attribute for cleaner event handling
+                    const attachmentData = escapeHtml(JSON.stringify(att));
+                    
+                    // Actions: download, preview, open-in-cloud, delete
+                    let actions = '';
+                    if ((window as any).AttachmentHandler) {
+                        actions += `<button class="attachment-btn download-btn" data-action="download" data-attachment-index="${index}">Download</button>`;
+                        if (att.contentType && att.contentType.startsWith('image/')) {
+                            actions += `<button class="attachment-btn preview-btn" data-action="preview" data-attachment-index="${index}">Preview</button>`;
+                        }
+                        if (att.cloudInfo) {
+                            actions += `<button class="attachment-btn cloud-btn" data-action="openInCloud" data-attachment-index="${index}">Open in Cloud</button>`;
+                        }
+                        actions += `<button class="attachment-btn delete-btn" data-action="delete" data-attachment-index="${index}">Delete</button>`;
+                    }
+                    return `<div class="attachment-item" data-attachment='${attachmentData}' data-attachment-index="${index}">
+                        <span class="attachment-icon">${icon}</span>
+                        <span class="attachment-name">${safeName}</span>
+                        <span class="attachment-size">${sizeStr}</span>
+                        <span class="attachment-actions">${actions}</span>
+                    </div>`;
+                }).join('')}
+            </div>
+        `;
+    }
 }
 
-export { EmailRenderer, type EmailCompatibleHtmlOptions }; 
+export { EmailRenderer, type EmailCompatibleHtmlOptions };
+
+// Unit test for renderAttachmentList
+if (typeof window !== 'undefined') {
+    (window as any).testRenderAttachmentList = () => {
+        const renderer = new (EmailRenderer as any)();
+        const testAttachments = [
+            { name: 'photo.jpg', filename: 'photo.jpg', contentType: 'image/jpeg', size: 204800, isInline: false },
+            { name: 'report.pdf', filename: 'report.pdf', contentType: 'application/pdf', size: 102400, isInline: false },
+            { name: 'cloud.docx', filename: 'cloud.docx', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', size: 51200, isInline: false, cloudInfo: { provider: 'Drive', accountKey: 'abc', partHeaderData: 'xyz' } },
+            { name: 'inline.png', filename: 'inline.png', contentType: 'image/png', size: 4096, isInline: true },
+            { filename: 'unknown.bin', size: 0 }, // Edge: missing name/contentType
+        ];
+        const html = renderer.renderAttachmentList(testAttachments);
+        console.log('Attachment list HTML:', html);
+        // Optionally, inject into DOM for visual inspection
+        const testDiv = document.createElement('div');
+        testDiv.innerHTML = html;
+        testDiv.style.border = '1px solid #ccc';
+        testDiv.style.margin = '8px';
+        testDiv.style.padding = '8px';
+        document.body.appendChild(testDiv);
+        console.log('✅ renderAttachmentList test completed');
+    };
+} 

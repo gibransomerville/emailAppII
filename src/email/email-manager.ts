@@ -120,14 +120,9 @@ class EmailManager {
      */
     standardizeEmailObject(emailData: RawEmailData, source: string = 'unknown'): Email {
         console.log('=== standardizeEmailObject CALLED ===', { id: emailData.id, messageId: emailData.messageId });
-
-        // Debug: Log the raw HTML and text before standardization
-        console.log('[DEBUG] standardizeEmailObject input:', {
-            id: emailData.id,
-            messageId: emailData.messageId,
-            html: emailData.html?.substring(0, 500),
-            text: emailData.text?.substring(0, 500)
-        });
+        // Debug: Log the raw emailData and its attachments
+        console.log('[DEBUG] standardizeEmailObject input emailData:', emailData);
+        console.log('[DEBUG] standardizeEmailObject input attachments:', emailData.attachments);
 
         // Helper function to parse email addresses
         const parseEmailAddress = (addr: any): EmailAddress => {
@@ -168,7 +163,7 @@ class EmailManager {
             bodyText: emailData.text || '',
             
             // Metadata
-            attachments: this.standardizeAttachments(emailData.attachments || []),
+            attachments: this.standardizeAttachments(emailData.attachments || [], emailData.messageId || emailData.id || ''),
             headers: emailData.headers instanceof Map ? 
                 Object.fromEntries(emailData.headers.entries()) : 
                 (emailData.headers || {}),
@@ -273,12 +268,10 @@ class EmailManager {
         (standardEmail as any).html = standardEmail.bodyHtml;
         (standardEmail as any).text = standardEmail.bodyText;
         
-        // Debug: Log the standardized HTML before returning
-        console.log('[DEBUG] standardizeEmailObject output:', {
-            id: standardEmail.id,
-            bodyHtml: standardEmail.bodyHtml?.substring(0, 500),
-            bodyText: standardEmail.bodyText?.substring(0, 500)
-        });
+        // Debug: Log the standardized email and its attachments
+        console.log('[DEBUG] standardizeEmailObject output:', standardEmail);
+        console.log('[DEBUG] standardizeEmailObject output attachments:', standardEmail.attachments);
+        
         // Warn if table tags are present in input but missing in output
         if (emailData.html && /<(table|tr|td|th|tbody|thead|tfoot)[\s>]/i.test(emailData.html) &&
             (!standardEmail.bodyHtml || !/<(table|tr|td|th|tbody|thead|tfoot)[\s>]/i.test(standardEmail.bodyHtml))) {
@@ -296,53 +289,118 @@ class EmailManager {
     }
 
     /**
+     * Enhance email with accurate attachment information using hybrid detection
+     * Falls back to raw RFC822 parsing if Gmail JSON API returns empty attachments
+     * @param email - Email object to enhance
+     * @param source - Email source ('gmail', 'imap', etc.)
+     * @returns Enhanced email with accurate attachments
+     */
+    async enhanceEmailAttachments(email: Email, source: string = 'gmail'): Promise<Email> {
+        // Only enhance Gmail emails that appear to have no attachments
+        if (source !== 'gmail' || !email.messageId || (email.attachments && email.attachments.length > 0)) {
+            return email;
+        }
+
+        try {
+            console.log(`[ATTACHMENT ENHANCEMENT] Checking email ${email.messageId} for missing attachments`);
+            
+            // Use IPC to fetch raw message and parse attachments
+            const ipcRenderer = (window as any).require('electron').ipcRenderer;
+            const googleAuth = (window as any).googleAuth;
+            
+            if (!googleAuth) {
+                console.warn('[ATTACHMENT ENHANCEMENT] No Google auth token available');
+                return email;
+            }
+
+            // Fetch raw Gmail message
+            const rawResult = await ipcRenderer.invoke('fetch-gmail-raw-message', { 
+                messageId: email.messageId, 
+                auth: googleAuth 
+            });
+            
+            if (!rawResult.success || !rawResult.raw) {
+                console.warn(`[ATTACHMENT ENHANCEMENT] Failed to fetch raw message: ${rawResult.error}`);
+                return email;
+            }
+
+            // Parse raw message for attachments
+            const parseResult = await ipcRenderer.invoke('parse-raw-email', rawResult.raw);
+            
+            if (!parseResult.success || !parseResult.parsed.attachments) {
+                console.warn(`[ATTACHMENT ENHANCEMENT] Failed to parse raw message: ${parseResult.error}`);
+                return email;
+            }
+
+            const rawAttachments = parseResult.parsed.attachments;
+            
+            if (rawAttachments.length > 0) {
+                console.log(`[ATTACHMENT ENHANCEMENT] Found ${rawAttachments.length} attachments in raw message that were missing from Gmail JSON`);
+                
+                // Convert raw attachments to standardized format
+                const standardizedAttachments = this.standardizeAttachments(rawAttachments, email.messageId);
+                
+                // Update email with enhanced attachment information
+                const enhancedEmail = {
+                    ...email,
+                    attachments: standardizedAttachments,
+                    hasAttachments: standardizedAttachments.length > 0
+                };
+                
+                console.log(`[ATTACHMENT ENHANCEMENT] Enhanced email ${email.messageId} with ${standardizedAttachments.length} attachments`);
+                return enhancedEmail;
+            } else {
+                console.log(`[ATTACHMENT ENHANCEMENT] No attachments found in raw message for ${email.messageId}`);
+                return email;
+            }
+            
+        } catch (error) {
+            console.error(`[ATTACHMENT ENHANCEMENT] Error enhancing email ${email.messageId}:`, error);
+            return email;
+        }
+    }
+
+    /**
      * Standardize attachment data across different email sources
      * @param attachments - Array of attachment objects
+     * @param messageId - Optional message ID for Gmail attachments
      * @returns Standardized attachment objects
      */
-    standardizeAttachments(attachments: any[]): Attachment[] {
+    standardizeAttachments(attachments: any[], messageId?: string): Attachment[] {
         if (!Array.isArray(attachments)) {
             return [];
         }
 
         return attachments.map((attachment: any, index: number): Attachment => {
-            const standardized: Attachment = {
-                filename: attachment.filename || attachment.name || `attachment_${index + 1}`,
+            const name = attachment.filename || attachment.name || `attachment_${index + 1}`;
+            const att: Attachment = {
+                name,
+                filename: name,
+                url: attachment.url || attachment.path || '',
                 contentType: attachment.contentType || attachment.mimeType || 'application/octet-stream',
+                contentTypeParam: attachment.contentTypeParam || undefined,
                 size: attachment.size || attachment.length || 0,
+                isInline: !!(attachment.contentDisposition && attachment.contentDisposition.toLowerCase().includes('inline')) || !!attachment.cid,
+                isTemporary: !!attachment.isTemporary,
+                cloudInfo: attachment.cloudInfo || (attachment.sendViaCloud ? {
+                    provider: attachment.cloudProvider || '',
+                    accountKey: attachment.cloudFileAccountKey || '',
+                    partHeaderData: attachment.cloudPartHeaderData || ''
+                } : undefined),
                 contentId: attachment.contentId || attachment.cid || undefined,
-                content: undefined,
-                encoding: attachment.encoding || 'base64'
+                charset: attachment.charset || undefined,
+                macType: attachment.macType || undefined,
+                macCreator: attachment.macCreator || undefined,
+                description: attachment.description || undefined,
+                disposition: attachment.contentDisposition || undefined,
+                msgUri: attachment.msgUri || undefined,
+                urlCharset: attachment.urlCharset || undefined,
+                content: attachment.content,
+                encoding: attachment.encoding || undefined,
+                attachmentId: attachment.attachmentId || undefined,
+                messageId: messageId || attachment.messageId || undefined
             };
-
-            // Handle different content formats
-            if (attachment.content) {
-                standardized.content = attachment.content;
-            } else if (attachment.data) {
-                standardized.content = attachment.data;
-            } else if (attachment.body) {
-                standardized.content = attachment.body;
-            }
-
-            // Handle Gmail-specific attachment data
-            if (attachment.attachmentId && !standardized.content) {
-                // Mark for lazy loading from Gmail API
-                standardized.attachmentId = attachment.attachmentId;
-                // Note: messageId would be stored separately for Gmail API calls
-            }
-
-            // Ensure content is properly encoded
-            if (standardized.content && typeof standardized.content === 'string') {
-                // Remove data URL prefix if present
-                if (standardized.content.startsWith('data:')) {
-                    const base64Index = standardized.content.indexOf('base64,');
-                    if (base64Index !== -1) {
-                        standardized.content = standardized.content.substring(base64Index + 7);
-                    }
-                }
-            }
-
-            return standardized;
+            return att;
         });
     }
 
@@ -638,4 +696,77 @@ Content-Disposition: attachment; filename="document.pdf"
 console.log('=== EmailManager CLASS DEFINED ===');
 console.log('EmailManager class methods:', Object.getOwnPropertyNames(EmailManager.prototype));
 
-export { EmailManager, type RawEmailData, type EmailAddressObject, type GmailAPI, type ParsedEmail, type EmailParsingStats, type DebugInfo }; 
+export { EmailManager, type RawEmailData, type EmailAddressObject, type GmailAPI, type ParsedEmail, type EmailParsingStats, type DebugInfo };
+
+// Unit test for standardizeAttachments
+if (typeof window !== 'undefined') {
+    (window as any).testStandardizeAttachments = () => {
+        const emailManager = new (EmailManager as any)({});
+        const testInput = [
+            {
+                filename: 'test.pdf',
+                url: 'https://example.com/test.pdf',
+                contentType: 'application/pdf',
+                size: 12345,
+                contentDisposition: 'attachment',
+                isTemporary: false
+            },
+            {
+                name: 'inline-image.png',
+                path: '/tmp/inline-image.png',
+                mimeType: 'image/png',
+                size: 54321,
+                contentDisposition: 'inline',
+                cid: 'imagecid',
+                isTemporary: true
+            },
+            {
+                filename: 'cloud.docx',
+                url: 'https://cloud.com/file.docx',
+                contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                size: 9999,
+                sendViaCloud: true,
+                cloudProvider: 'dropbox',
+                cloudFileAccountKey: 'acc123',
+                cloudPartHeaderData: 'headerdata'
+            }
+        ];
+        const result = emailManager.standardizeAttachments(testInput);
+        console.assert(result.length === 3, 'Should return 3 attachments');
+        console.assert(result[0].name === 'test.pdf', 'First attachment name');
+        console.assert(result[0].filename === 'test.pdf', 'First attachment filename');
+        console.assert(result[1].isInline === true, 'Second attachment is inline');
+        console.assert(result[2].cloudInfo?.provider === 'dropbox', 'Third attachment cloud provider');
+        console.log('✅ testStandardizeAttachments passed', result);
+        return result;
+    };
+
+    // Unit test for edge cases in attachment standardization
+    (window as any).testStandardizeAttachmentsEdgeCases = () => {
+        const emailManager = new (EmailManager as any)({});
+        const testInput = [
+            // Hidden attachment
+            { filename: 'hidden.txt', size: 100, contentDisposition: 'hidden' },
+            // Large attachment
+            { filename: 'large.zip', size: 100000000, contentDisposition: 'attachment' },
+            // Corrupted attachment (missing fields)
+            { size: 0 },
+            // Charset issue
+            { filename: 'utf8.txt', size: 10, contentDisposition: 'attachment', charset: 'utf-8' },
+        ];
+        const result = emailManager.standardizeAttachments(testInput);
+        if (
+            result.length === 4 &&
+            result[0].filename === 'hidden.txt' &&
+            result[1].filename === 'large.zip' &&
+            result[2].filename === 'attachment_3' &&
+            result[3].filename === 'utf8.txt'
+        ) {
+            console.log('✅ Edge case attachment standardization test passed');
+        } else {
+            console.error('❌ Edge case attachment standardization test failed', result);
+        }
+    };
+
+    (window as any).EmailManager = EmailManager;
+} 

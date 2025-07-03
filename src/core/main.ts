@@ -622,6 +622,9 @@ ipcMain.handle('fetch-gmail-emails', async (_event, params = {}) => {
         // Extract both HTML and text content
         const bodyContent = extractMessageBody(fullMessage.data.payload);
         
+        // Extract attachment information from payload
+        const attachments = extractAttachments(fullMessage.data.payload, fullMessage.data.id || message.id!);
+        
         return {
           id: fullMessage.data.id,
           messageId: fullMessage.data.id,
@@ -636,7 +639,7 @@ ipcMain.handle('fetch-gmail-emails', async (_event, params = {}) => {
           snippet: fullMessage.data.snippet || '',
           isHtml: bodyContent.isHtml,
           read: !fullMessage.data.labelIds?.includes('UNREAD'),
-          attachments: []
+          attachments: attachments
         };
       } catch (error) {
         console.warn(`Failed to fetch Gmail message ${message.id}:`, error);
@@ -777,6 +780,69 @@ ipcMain.handle('validate-google-token', async (_event, token) => {
   }
 });
 
+// IPC handler for parsing raw email messages
+ipcMain.handle('parse-raw-email', async (_event, rawData) => {
+  try {
+    // Import mailparser in main process where Node.js modules work properly
+    const { simpleParser } = await import('mailparser');
+    
+    let rawText = rawData;
+    // Try to decode base64url if input looks like base64
+    try {
+      if (/^[A-Za-z0-9_-]+={0,2}$/.test(rawData) && rawData.length > 100) {
+        rawText = Buffer.from(rawData, 'base64url').toString('utf-8');
+      }
+    } catch (e) {
+      console.warn('Not base64url, using as plain text');
+    }
+    
+    const parsed = await simpleParser(rawText);
+    
+    // Helper function to extract address string
+    const extractAddress = (addr: any): string => {
+      if (!addr) return '';
+      if (typeof addr === 'string') return addr;
+      if (addr.text) return addr.text;
+      if (Array.isArray(addr.value) && addr.value.length > 0) {
+        return addr.value[0].address || '';
+      }
+      return '';
+    };
+    
+    // Extract attachment information
+    const attachments = (parsed.attachments || []).map(att => ({
+      filename: att.filename,
+      contentType: att.contentType,
+      size: att.size,
+      contentId: att.contentId,
+      contentDisposition: att.contentDisposition,
+      cid: att.cid,
+      checksum: att.checksum,
+      related: att.related,
+      headers: att.headers ? Object.fromEntries(att.headers.entries()) : {},
+    }));
+    
+    return {
+      success: true,
+      parsed: {
+        messageId: parsed.messageId || '',
+        date: parsed.date?.toISOString() || '',
+        from: extractAddress(parsed.from),
+        to: extractAddress(parsed.to),
+        subject: parsed.subject || '',
+        bodyHtml: parsed.html || '',
+        bodyText: parsed.text || '',
+        attachments,
+        headers: Object.fromEntries(parsed.headers.entries()),
+      }
+    };
+    
+  } catch (error: any) {
+    console.error('Error parsing raw email:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 // Helper function to extract message body from Gmail payload
 function extractMessageBody(payload: any): { html: string; text: string; isHtml: boolean } {
   if (!payload) return { html: '', text: '', isHtml: false };
@@ -821,6 +887,41 @@ function extractMessageBody(payload: any): { html: string; text: string; isHtml:
     text: textContent,
     isHtml
   };
+}
+
+// Helper function to extract attachments from Gmail payload
+function extractAttachments(payload: any, messageId: string): any[] {
+  if (!payload || !payload.parts || !Array.isArray(payload.parts)) return [];
+  
+  const attachments: any[] = [];
+  
+  for (const part of payload.parts) {
+    // Check if this part is an attachment
+    if (part.filename && part.filename.length > 0) {
+      // This is an attachment
+      attachments.push({
+        filename: part.filename,
+        contentType: part.mimeType || 'application/octet-stream',
+        size: part.body?.size || 0,
+        contentId: part.contentId,
+        contentDisposition: part.contentDisposition,
+        cid: part.cid,
+        attachmentId: part.body?.attachmentId, // Gmail-specific attachment ID for fetching content
+        messageId: messageId, // Store message ID for fetching content later
+        encoding: 'base64',
+        // Content will be fetched lazily when needed
+        content: null
+      });
+    }
+    
+    // Recursively check nested parts
+    if (part.parts) {
+      const nestedAttachments = extractAttachments(part, messageId);
+      attachments.push(...nestedAttachments);
+    }
+  }
+  
+  return attachments;
 }
 
 // Create application menu
@@ -887,4 +988,63 @@ const template: Electron.MenuItemConstructorOptions[] = [
 ];
 
 const menu = Menu.buildFromTemplate(template);
-Menu.setApplicationMenu(menu); 
+Menu.setApplicationMenu(menu);
+
+ipcMain.handle('fetch-gmail-raw-message', async (_event, { messageId, auth }) => {
+  try {
+    if (!auth || !auth.access_token) {
+      return { success: false, error: 'No valid authentication token provided' };
+    }
+    // Import googleapis dynamically to avoid module resolution issues
+    const { google } = await import('googleapis');
+    // Create OAuth2 client with the provided token
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials(auth);
+    // Create Gmail API instance
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    // Fetch the raw message
+    const res = await gmail.users.messages.get({
+      userId: 'me',
+      id: messageId,
+      format: 'raw'
+    });
+    return { success: true, raw: res.data.raw };
+  } catch (error) {
+    const err = error && typeof error === 'object' && 'message' in error ? (error as any).message : String(error);
+    return { success: false, error: err };
+  }
+});
+
+// IPC handler for fetching Gmail attachment content
+ipcMain.handle('fetch-gmail-attachment', async (_event, { messageId, attachmentId, auth }) => {
+  try {
+    if (!auth || !auth.access_token) {
+      return { success: false, error: 'No valid authentication token provided' };
+    }
+    if (!messageId || !attachmentId) {
+      return { success: false, error: 'Message ID and attachment ID are required' };
+    }
+    
+    // Import googleapis dynamically to avoid module resolution issues
+    const { google } = await import('googleapis');
+    // Create OAuth2 client with the provided token
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials(auth);
+    // Create Gmail API instance
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    
+    // Fetch the attachment content
+    const res = await gmail.users.messages.attachments.get({
+      userId: 'me',
+      messageId: messageId,
+      id: attachmentId
+    });
+    
+    return { success: true, data: res.data.data, size: res.data.size };
+  } catch (error) {
+    const err = error && typeof error === 'object' && 'message' in error ? (error as any).message : String(error);
+    return { success: false, error: err };
+  }
+});
+
+// Usage: ipcRenderer.invoke('fetch-gmail-raw-message', { messageId, auth: googleAuth }) 
