@@ -16,6 +16,7 @@ import { EmailManager } from '../email/email-manager.js';
 import { EmailRenderer } from '../email/email-renderer.js';
 import { EmailFilterManager } from '../email/email-filter-manager.js';
 import { MarketingEmailDetector } from '../email/marketing-email-detector.js';
+import { AttachmentHandler } from '../utils/attachment-handler.js';
 
 console.log('=== IMPORTS COMPLETED ===');
 console.log('All modules imported successfully');
@@ -97,6 +98,20 @@ try {
             return escapeMap[char];
         })
     };
+}
+
+// Initialize AttachmentHandler and make it available globally
+try {
+    const attachmentHandlerInitialized = AttachmentHandler.initialize();
+    if (attachmentHandlerInitialized) {
+        (globalThis as any).AttachmentHandler = AttachmentHandler;
+        console.log('AttachmentHandler initialized and made globally available');
+    } else {
+        throw new Error('AttachmentHandler initialization failed');
+    }
+} catch (error) {
+    console.error('AttachmentHandler initialization failed:', error);
+    uiThemeManager.showNotification('Attachment handling may be limited', 'warning');
 }
 
 // Main initialization function

@@ -8,7 +8,7 @@ export default defineConfig({
     emptyOutDir: false, // Don't delete other Electron build files
     rollupOptions: {
       input: {
-        renderer: resolve(__dirname, 'dist/renderer.js'), // Use compiled JS files
+        renderer: resolve(__dirname, 'dist/core/renderer.js'), // Updated path to match TypeScript output
       },
       output: {
         entryFileNames: '[name].js',
@@ -40,10 +40,10 @@ export default defineConfig({
   },
   optimizeDeps: {
     include: [
-      './dist/imap-email-manager.js',
-      './dist/email-composer.js',
-      './dist/ui-theme-manager.js',
-      './dist/ui-components.js'
+      './dist/email/imap-email-manager.js',
+      './dist/email/email-composer.js',
+      './dist/ui/ui-theme-manager.js',
+      './dist/ui/ui-components.js'
     ]
   }
 }); 

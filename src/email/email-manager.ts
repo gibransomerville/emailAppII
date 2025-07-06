@@ -306,7 +306,10 @@ class EmailManager {
             
             // Use IPC to fetch raw message and parse attachments
             const ipcRenderer = (window as any).require('electron').ipcRenderer;
-            const googleAuth = (window as any).googleAuth;
+            
+            // Get auth token from AuthManager
+            const AuthManager = (await import('../auth/auth-manager.js')).AuthManager;
+            const googleAuth = AuthManager.getCurrentToken();
             
             if (!googleAuth) {
                 console.warn('[ATTACHMENT ENHANCEMENT] No Google auth token available');

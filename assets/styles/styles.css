@@ -2740,3 +2740,139 @@ table.structure__table {
     width: 100%;
     height: auto;
 }
+
+/* Attachment Styling */
+.email-attachments {
+    margin: var(--sh-space-4) 0;
+    padding: var(--sh-space-4);
+    border-top: 1px solid var(--sh-gray-200);
+}
+
+.attachment-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: var(--sh-space-3);
+    margin-top: var(--sh-space-3);
+}
+
+.gmail-attachment-item {
+    aspect-ratio: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--sh-gray-50);
+    border: 1px solid var(--sh-gray-200);
+    border-radius: var(--sh-radius);
+    padding: var(--sh-space-3);
+    transition: var(--sh-transition);
+    position: relative;
+}
+
+.gmail-attachment-item:hover {
+    border-color: var(--sh-gray-300);
+    background: var(--sh-gray-100);
+}
+
+.attachment-name {
+    font-size: var(--sh-text-sm);
+    font-weight: var(--sh-font-medium);
+    color: var(--sh-gray-900);
+    text-align: left;
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+    word-break: break-word;
+    hyphens: auto;
+    width: 100%;
+    margin-bottom: auto;
+    padding-right: var(--sh-space-8); /* Make space for the download button */
+    max-height: calc(100% - 40px); /* Leave space for the button */
+    overflow-y: auto;
+}
+
+.attachment-btn {
+    position: absolute;
+    bottom: var(--sh-space-2);
+    right: var(--sh-space-2);
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--sh-gray-200);
+    border-radius: var(--sh-radius-sm);
+    background: var(--sh-white);
+    color: var(--sh-gray-700);
+    cursor: pointer;
+    transition: var(--sh-transition);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.attachment-btn:hover {
+    background: var(--sh-gray-100);
+    border-color: var(--sh-gray-300);
+    color: var(--sh-gray-900);
+    transform: translateY(-1px);
+}
+
+.attachment-btn:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--sh-blue-light);
+}
+
+.attachment-btn.preview-btn,
+.attachment-btn.delete-btn,
+.attachment-btn.cloud-btn {
+    display: none;
+}
+
+.attachment-btn.download-btn {
+    background: var(--sh-blue);
+    color: var(--sh-white);
+    border-color: var(--sh-blue);
+}
+
+.attachment-btn.download-btn:hover {
+    background: var(--sh-blue-dark);
+    border-color: var(--sh-blue-dark);
+}
+
+.attachment-btn i {
+    font-size: var(--sh-text-sm);
+}
+
+/* Dark theme adjustments */
+[data-theme="dark"] .gmail-attachment-item {
+    background: var(--sh-gray-800);
+    border-color: var(--sh-gray-700);
+}
+
+[data-theme="dark"] .gmail-attachment-item:hover {
+    background: var(--sh-gray-700);
+    border-color: var(--sh-gray-600);
+}
+
+[data-theme="dark"] .attachment-name {
+    color: var(--sh-gray-100);
+}
+
+[data-theme="dark"] .attachment-btn {
+    background: var(--sh-gray-700);
+    border-color: var(--sh-gray-600);
+    color: var(--sh-gray-300);
+}
+
+[data-theme="dark"] .attachment-btn:hover {
+    background: var(--sh-gray-600);
+    border-color: var(--sh-gray-500);
+    color: var(--sh-white);
+}
+
+[data-theme="dark"] .attachment-btn.download-btn {
+    background: var(--sh-blue);
+    color: var(--sh-white);
+    border-color: var(--sh-blue);
+}
+
+[data-theme="dark"] .attachment-btn.download-btn:hover {
+    background: var(--sh-blue-dark);
+    border-color: var(--sh-blue-dark);
+}

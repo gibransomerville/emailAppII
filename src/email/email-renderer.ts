@@ -36,77 +36,207 @@ class EmailRenderer {
     }
 
     /**
-     * Set up event delegation for attachment buttons
+     * Set up attachment event listeners using event delegation
      */
     setupAttachmentEventListeners(): void {
+        // Create bound handler
+        const boundClickHandler = (event: MouseEvent) => {
+            const target = event.target as HTMLElement;
+            const downloadButton = target.closest('.download-btn') as HTMLElement | null;
+            
+            // Only proceed if we clicked on or within a download button
+            if (!downloadButton) {
+                return;
+            }
+
+            // Stop event from bubbling up
+            event.stopPropagation();
+            event.preventDefault();
+            
+            console.debug('[DEBUG] Download button clicked', downloadButton);
+            this.handleAttachmentClick(downloadButton);
+        };
+
         // Remove existing listener if it exists
-        document.removeEventListener('click', this.handleAttachmentClick);
+        document.removeEventListener('click', boundClickHandler);
         
         // Add event delegation for attachment buttons
-        document.addEventListener('click', this.handleAttachmentClick.bind(this));
+        document.addEventListener('click', boundClickHandler);
     }
 
     /**
      * Handle attachment button clicks
      */
-    private handleAttachmentClick(event: Event): void {
-        const target = event.target as HTMLElement;
+    private handleAttachmentClick(button: HTMLElement): void {
+        console.debug('[DEBUG] handleAttachmentClick called with button:', button);
         
-        // Check if clicked element is an attachment button
-        if (!target.classList.contains('attachment-btn')) {
+        // Prevent double-clicks while loading
+        if (button.hasAttribute('data-loading')) {
             return;
         }
         
-        const action = target.getAttribute('data-action');
-        const attachmentIndex = target.getAttribute('data-attachment-index');
+        const action = button.getAttribute('data-action');
+        const attachmentIndex = button.getAttribute('data-attachment-index');
+        
+        console.debug('[DEBUG] Attachment action:', action, 'Attachment index:', attachmentIndex);
         
         if (!action || attachmentIndex === null) {
+            console.warn('[DEBUG] Missing action or attachment index', { action, attachmentIndex });
             return;
         }
         
         // Find the attachment item container
-        const attachmentItem = target.closest('.attachment-item');
+        const attachmentItem = button.closest('.gmail-attachment-item');
         if (!attachmentItem) {
+            console.warn('[DEBUG] Could not find parent attachment item');
             return;
         }
         
         // Get attachment data from the container
         const attachmentDataStr = attachmentItem.getAttribute('data-attachment');
         if (!attachmentDataStr) {
+            console.warn('[DEBUG] No attachment data found');
             return;
         }
         
         try {
             const attachmentData = JSON.parse(attachmentDataStr);
             
-            // Call the appropriate AttachmentHandler method
-            if ((window as any).AttachmentHandler) {
-                (async () => {
-                    try {
-                        switch (action) {
-                            case 'download':
-                                await (window as any).AttachmentHandler.downloadAttachment(attachmentData);
-                                break;
-                            case 'preview':
-                                await (window as any).AttachmentHandler.previewAttachment(attachmentData);
-                                break;
-                            case 'openInCloud':
-                                (window as any).AttachmentHandler.openInCloud(attachmentData);
-                                break;
-                            case 'delete':
-                                (window as any).AttachmentHandler.deleteAttachment(attachmentData);
-                                break;
+            // Handle download action with fallback
+            if (action === 'download') {
+                // Set loading state
+                button.setAttribute('data-loading', 'true');
+                button.style.opacity = '0.7';
+                button.style.cursor = 'wait';
+                
+                console.debug('[DEBUG] Download action detected, calling handleDownloadAttachment', attachmentData);
+                this.handleDownloadAttachment(attachmentData)
+                    .finally(() => {
+                        // Reset loading state
+                        button.removeAttribute('data-loading');
+                        button.style.removeProperty('opacity');
+                        button.style.removeProperty('cursor');
+                    });
+            } else {
+                // Call the appropriate AttachmentHandler method for other actions
+                if ((window as any).AttachmentHandler) {
+                    (async () => {
+                        try {
+                            switch (action) {
+                                case 'preview':
+                                    await (window as any).AttachmentHandler.previewAttachment(attachmentData);
+                                    break;
+                                case 'openInCloud':
+                                    (window as any).AttachmentHandler.openInCloud(attachmentData);
+                                    break;
+                                case 'delete':
+                                    (window as any).AttachmentHandler.deleteAttachment(attachmentData);
+                                    break;
+                            }
+                        } catch (error) {
+                            console.error('Error handling attachment action:', error);
+                            if (typeof (window as any).showNotification !== 'undefined') {
+                                (window as any).showNotification('Failed to perform attachment action: ' + (error as Error).message, 'error');
+                            }
                         }
-                    } catch (error) {
-                        console.error('Error handling attachment action:', error);
-                        if (typeof (window as any).showNotification !== 'undefined') {
-                            (window as any).showNotification('Failed to perform attachment action: ' + (error as Error).message, 'error');
-                        }
-                    }
-                })();
+                    })();
+                }
             }
         } catch (error) {
             console.error('Error handling attachment click:', error);
+            button.removeAttribute('data-loading');
+            button.style.removeProperty('opacity');
+            button.style.removeProperty('cursor');
+        }
+    }
+
+    /**
+     * Handle attachment download with fallback logic
+     * @param attachmentData - Attachment data object
+     */
+    private async handleDownloadAttachment(attachmentData: any): Promise<void> {
+        console.debug('[DEBUG] handleDownloadAttachment called', attachmentData);
+        try {
+            // First try using AttachmentHandler if available
+            if ((window as any).AttachmentHandler) {
+                await (window as any).AttachmentHandler.downloadAttachment(attachmentData);
+                return;
+            }
+            
+            // Fallback: handle Gmail attachments with lazy loading
+            if (attachmentData.attachmentId && attachmentData.messageId && !attachmentData.content) {
+                // Use AttachmentHandler for Gmail attachments
+                const AttachmentHandler = (window as any).AttachmentHandler || (await import('../utils/attachment-handler.js')).AttachmentHandler;
+                if (AttachmentHandler) {
+                    await AttachmentHandler.downloadAttachment(attachmentData);
+                    return;
+                }
+            }
+            
+            // Final fallback: simple download using existing content
+            if (attachmentData.content) {
+                this.downloadAttachmentContent(attachmentData);
+            } else {
+                throw new Error('No attachment content or download mechanism available');
+            }
+            
+        } catch (error) {
+            console.error('Error downloading attachment:', error);
+            if (typeof (window as any).showNotification !== 'undefined') {
+                (window as any).showNotification('Failed to download attachment: ' + (error as Error).message, 'error');
+            } else {
+                alert('Failed to download attachment: ' + (error as Error).message);
+            }
+        }
+    }
+
+    /**
+     * Download attachment content directly
+     * @param attachmentData - Attachment data object
+     */
+    private downloadAttachmentContent(attachmentData: any): void {
+        try {
+            let dataURL: string;
+            
+            if (attachmentData.content) {
+                // Create data URL from content
+                const contentType = attachmentData.contentType || 'application/octet-stream';
+                const content = attachmentData.content;
+                
+                if (typeof content === 'string') {
+                    // Assume base64 encoded
+                    dataURL = `data:${contentType};base64,${content}`;
+                } else if (content instanceof ArrayBuffer) {
+                    // Convert ArrayBuffer to base64
+                    const bytes = new Uint8Array(content);
+                    const binary = bytes.reduce((data, byte) => data + String.fromCharCode(byte), '');
+                    const base64 = btoa(binary);
+                    dataURL = `data:${contentType};base64,${base64}`;
+                } else {
+                    throw new Error('Unsupported content type');
+                }
+            } else {
+                throw new Error('No content available for download');
+            }
+            
+            // Create temporary download link
+            const link = document.createElement('a');
+            link.href = dataURL;
+            link.download = attachmentData.filename || attachmentData.name || 'attachment';
+            
+            // Trigger download
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            // Show success notification
+            if (typeof (window as any).showNotification !== 'undefined') {
+                (window as any).showNotification(`Downloaded ${attachmentData.filename || 'attachment'}`, 'success');
+            }
+            
+        } catch (error) {
+            console.error('Error downloading attachment content:', error);
+            throw error;
         }
     }
 
@@ -580,7 +710,7 @@ class EmailRenderer {
     }
 
     /**
-     * Render a list of attachments with metadata and actions
+     * Render a list of attachments with minimalistic design
      */
     renderAttachmentList(attachments: any[]): string {
         // Fallback HTML escape function
@@ -592,36 +722,22 @@ class EmailRenderer {
         const safeEscape = (window as any).SafeHTML && typeof (window as any).SafeHTML.escape === 'function'
             ? (window as any).SafeHTML.escape
             : escapeHtml;
+
         if (!attachments || attachments.length === 0) {
             return '<div class="no-attachments">No attachments</div>';
         }
+
         return `
             <div class="attachment-list">
                 ${attachments.map((att, index) => {
                     const safeName = safeEscape(att.name || att.filename || 'attachment');
-                    const sizeStr = att.size ? `(${(att.size/1024).toFixed(1)} KB)` : '';
-                    const icon = att.contentType && att.contentType.startsWith('image/') ? '🖼️' : '📎';
-                    
-                    // Store attachment data in data attribute for cleaner event handling
                     const attachmentData = escapeHtml(JSON.stringify(att));
-                    
-                    // Actions: download, preview, open-in-cloud, delete
-                    let actions = '';
-                    if ((window as any).AttachmentHandler) {
-                        actions += `<button class="attachment-btn download-btn" data-action="download" data-attachment-index="${index}">Download</button>`;
-                        if (att.contentType && att.contentType.startsWith('image/')) {
-                            actions += `<button class="attachment-btn preview-btn" data-action="preview" data-attachment-index="${index}">Preview</button>`;
-                        }
-                        if (att.cloudInfo) {
-                            actions += `<button class="attachment-btn cloud-btn" data-action="openInCloud" data-attachment-index="${index}">Open in Cloud</button>`;
-                        }
-                        actions += `<button class="attachment-btn delete-btn" data-action="delete" data-attachment-index="${index}">Delete</button>`;
-                    }
-                    return `<div class="attachment-item" data-attachment='${attachmentData}' data-attachment-index="${index}">
-                        <span class="attachment-icon">${icon}</span>
-                        <span class="attachment-name">${safeName}</span>
-                        <span class="attachment-size">${sizeStr}</span>
-                        <span class="attachment-actions">${actions}</span>
+
+                    return `<div class="gmail-attachment-item" data-attachment='${attachmentData}' data-attachment-index="${index}">
+                        <div class="attachment-name" title="${safeName}">${safeName}</div>
+                        <button class="attachment-btn download-btn" data-action="download" data-attachment-index="${index}" title="Download ${safeName}">
+                            <i class="fas fa-download"></i>
+                        </button>
                     </div>`;
                 }).join('')}
             </div>

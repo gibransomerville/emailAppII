@@ -11,7 +11,7 @@
  * @version 1.0.0
  */
 
-import { Attachment } from '../../types/email';
+import { Attachment } from '../../types/email.js';
 
 // File type categories
 type FileTypeCategory = 'image' | 'text' | 'pdf' | 'video' | 'audio' | 'document' | 'archive' | 'unknown';
@@ -51,13 +51,15 @@ class AttachmentManager {
         }
         
         try {
-            const googleAuth = (window as any).googleAuth;
+            // Always request Google auth token from main process
+            const ipcRenderer = (window as any).require('electron').ipcRenderer;
+            const googleAuth = await ipcRenderer.invoke('get-google-auth');
             if (!googleAuth) {
-                throw new Error('Google authentication not available');
+                console.warn('Google authentication not available for Gmail attachment');
+                throw new Error('Google authentication is required to download Gmail attachments. Please sign in to your Google account first.');
             }
             
             // Use IPC to fetch attachment content
-            const ipcRenderer = (window as any).require('electron').ipcRenderer;
             const result = await ipcRenderer.invoke('fetch-gmail-attachment', {
                 messageId: attachment.messageId,
                 attachmentId: attachment.attachmentId,
@@ -90,8 +92,21 @@ class AttachmentManager {
             
             // Fetch content if not available
             if (!attachment.content && attachment.attachmentId) {
-                const content = await this.fetchGmailAttachmentContent(attachment);
-                attachment.content = content;
+                try {
+                    const content = await this.fetchGmailAttachmentContent(attachment);
+                    attachment.content = content;
+                } catch (authError) {
+                    // Provide more specific error handling for authentication issues
+                    console.error('Error fetching Gmail attachment content:', authError);
+                    const errorMessage = (authError as Error).message;
+                    if (errorMessage.includes('authentication')) {
+                        if (typeof (window as any).showNotification !== 'undefined') {
+                            (window as any).showNotification('Please sign in to your Google account to download Gmail attachments.', 'warning');
+                        }
+                        return;
+                    }
+                    throw authError;
+                }
             }
             
             // Use regular download handler
@@ -117,8 +132,21 @@ class AttachmentManager {
             
             // Fetch content if not available
             if (!attachment.content && attachment.attachmentId) {
-                const content = await this.fetchGmailAttachmentContent(attachment);
-                attachment.content = content;
+                try {
+                    const content = await this.fetchGmailAttachmentContent(attachment);
+                    attachment.content = content;
+                } catch (authError) {
+                    // Provide more specific error handling for authentication issues
+                    console.error('Error fetching Gmail attachment content:', authError);
+                    const errorMessage = (authError as Error).message;
+                    if (errorMessage.includes('authentication')) {
+                        if (typeof (window as any).showNotification !== 'undefined') {
+                            (window as any).showNotification('Please sign in to your Google account to preview Gmail attachments.', 'warning');
+                        }
+                        return;
+                    }
+                    throw authError;
+                }
             }
             
             // Use regular preview handler
@@ -265,13 +293,41 @@ class AttachmentHandler {
         try {
             // Check if we need to fetch content lazily for Gmail attachments
             if (!attachment.content && attachment.attachmentId && attachment.messageId) {
-                const attachmentManager = AttachmentManager.getInstance();
-                const content = await attachmentManager.fetchGmailAttachmentContent(attachment);
-                attachment.content = content;
+                try {
+                    const attachmentManager = AttachmentManager.getInstance();
+                    const content = await attachmentManager.fetchGmailAttachmentContent(attachment);
+                    attachment.content = content;
+                } catch (authError) {
+                    // If Google authentication is not available, check if we can handle this attachment another way
+                    console.warn('Failed to fetch Gmail attachment content:', authError);
+                    
+                    // If the attachment has a URL, try to use that instead
+                    if (attachment.url && attachment.url.startsWith('http')) {
+                        console.log('Attempting to use attachment URL as fallback');
+                        try {
+                            const response = await fetch(attachment.url);
+                            if (response.ok) {
+                                const blob = await response.blob();
+                                const arrayBuffer = await blob.arrayBuffer();
+                                const bytes = new Uint8Array(arrayBuffer);
+                                const base64 = btoa(String.fromCharCode.apply(null, Array.from(bytes)));
+                                attachment.content = base64;
+                            } else {
+                                throw new Error(`Failed to fetch attachment from URL: ${response.status}`);
+                            }
+                        } catch (fetchError) {
+                            console.error('Failed to fetch attachment from URL:', fetchError);
+                            throw authError; // Re-throw the original authentication error
+                        }
+                    } else {
+                        // No alternative way to get content, re-throw the authentication error
+                        throw authError;
+                    }
+                }
             }
             
             if (!attachment.content) {
-                throw new Error('No attachment content available');
+                throw new Error('No attachment content available. The attachment may require authentication to download.');
             }
 
             let content = attachment.content;
@@ -438,37 +494,17 @@ class AttachmentHandler {
      * Create individual attachment item
      */
     static createAttachmentItem(attachment: Attachment, index: number): string {
-        const fileSize = this.formatFileSize(attachment.size);
-        const icon = this.getFileIcon(attachment.contentType, attachment.filename);
         const filename = attachment.filename || `attachment_${index + 1}`;
-        const isPreviewable = this.getFileTypeCategory(attachment.contentType) !== 'unknown';
         const safeHTML = (globalThis as any).SafeHTML;
 
         return `
-            <div class="attachment-item" data-attachment-index="${index}" style="display: flex; align-items: center; padding: 8px; border: 1px solid #e0e0e0; border-radius: 4px; margin-bottom: 8px; background: #fafafa;">
-                <div class="attachment-icon" style="margin-right: 12px; color: #5f6368;">
-                    <i class="${icon}" style="font-size: 20px;"></i>
+            <div class="gmail-attachment-item" data-attachment-index="${index}">
+                <div class="attachment-name">
+                    ${safeHTML?.escapeHtml ? safeHTML.escapeHtml(filename) : filename}
                 </div>
-                <div class="attachment-info" style="flex-grow: 1; min-width: 0;">
-                    <div class="attachment-name" style="font-weight: 500; font-size: 14px; color: #202124; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                        ${safeHTML?.escapeHtml ? safeHTML.escapeHtml(filename) : filename}
-                    </div>
-                    <div class="attachment-details" style="font-size: 12px; color: #5f6368;">
-                        ${safeHTML?.escapeHtml ? safeHTML.escapeHtml(attachment.contentType || 'Unknown type') : (attachment.contentType || 'Unknown type')} • ${fileSize}
-                    </div>
-                </div>
-                <div class="attachment-actions" style="display: flex; gap: 8px;">
-                    ${isPreviewable ? `
-                        <button class="attachment-preview-btn" data-attachment-index="${index}" 
-                                style="padding: 4px 8px; border: 1px solid #dadce0; border-radius: 4px; background: white; color: #1a73e8; cursor: pointer; font-size: 12px;">
-                            <i class="fas fa-eye"></i> Preview
-                        </button>
-                    ` : ''}
-                    <button class="attachment-download-btn" data-attachment-index="${index}"
-                            style="padding: 4px 8px; border: 1px solid #dadce0; border-radius: 4px; background: white; color: #1a73e8; cursor: pointer; font-size: 12px;">
-                        <i class="fas fa-download"></i> Download
-                    </button>
-                </div>
+                <button class="attachment-btn download-btn" data-attachment-index="${index}" title="Download ${safeHTML?.escapeHtml ? safeHTML.escapeHtml(filename) : filename}">
+                    <i class="fas fa-download"></i>
+                </button>
             </div>
         `;
     }
@@ -673,30 +709,64 @@ class AttachmentHandler {
      */
     static async downloadAttachment(attachment: Attachment): Promise<void> {
         try {
+            // Validate attachment data
+            if (!attachment) {
+                throw new Error('Invalid attachment data');
+            }
+
+            // Check for potentially dangerous file types
+            const dangerousExtensions = ['.exe', '.bat', '.cmd', '.msi', '.scr'];
+            const filename = attachment.filename || attachment.name || '';
+            const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
+            
+            if (dangerousExtensions.includes(ext)) {
+                if (typeof (window as any).showNotification !== 'undefined') {
+                    (window as any).showNotification('Warning: Executable files may be dangerous. Please verify the source.', 'warning');
+                }
+                // Add a 3-second delay for potentially dangerous files
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+
+            // Handle Gmail attachments
+            if (attachment.attachmentId && !attachment.content) {
+                const manager = AttachmentManager.getInstance();
+                await manager.downloadAttachmentWithLoading(attachment);
+                return;
+            }
+
+            // Create data URL for download
             const dataURL = await this.createDataURL(attachment);
             
-            // Create temporary download link
+            // Create and trigger download link
             const link = document.createElement('a');
             link.href = dataURL;
-            link.download = attachment.filename || 'attachment';
-            
-            // Trigger download
+            link.download = attachment.filename || attachment.name || 'attachment';
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-            
+
             // Show success notification
             if (typeof (window as any).showNotification !== 'undefined') {
-                (window as any).showNotification(`Downloaded ${attachment.filename}`, 'success');
+                (window as any).showNotification(`Downloaded ${attachment.filename || 'attachment'}`, 'success');
             }
-            
+
         } catch (error) {
             console.error('Error downloading attachment:', error);
-            if (typeof (window as any).showNotification !== 'undefined') {
-                (window as any).showNotification('Unable to download attachment: ' + (error as Error).message, 'error');
-            } else {
-                alert('Unable to download attachment: ' + (error as Error).message);
+            let errorMessage = (error as Error).message;
+            
+            // Provide more specific error messages
+            if (errorMessage.includes('MIME type')) {
+                errorMessage = 'This file type is not supported for download';
+            } else if (errorMessage.includes('size')) {
+                errorMessage = 'The file is too large to download directly. Please use your email client.';
+            } else if (errorMessage.includes('network')) {
+                errorMessage = 'Network error. Please check your connection and try again.';
             }
+            
+            if (typeof (window as any).showNotification !== 'undefined') {
+                (window as any).showNotification('Failed to download: ' + errorMessage, 'error');
+            }
+            throw error;
         }
     }
 
@@ -829,15 +899,15 @@ if (typeof window !== 'undefined') {
     };
 }
 
-export default AttachmentHandler;
-export { 
-    AttachmentHandler, 
-    createAttachmentList, 
-    previewAttachment, 
-    downloadAttachment, 
-    formatFileSize, 
-    getFileIcon, 
-    getFileTypeCategory,
-    type FileTypeCategory,
-    type AttachmentValidationResult
+// Export the AttachmentHandler class and helper functions
+export { AttachmentHandler, AttachmentManager };
+
+// Export helper functions for direct use
+export {
+    createAttachmentList,
+    previewAttachment,
+    downloadAttachment,
+    formatFileSize,
+    getFileIcon,
+    getFileTypeCategory
 }; 

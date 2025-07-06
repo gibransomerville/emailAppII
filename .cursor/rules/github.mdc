@@ -1,5 +1,6 @@
 ---
-description:
-globs:
-alwaysApply: false
+description: 
+globs: 
+alwaysApply: true
 ---
+Do not commit to git unless explicitly told to do so.

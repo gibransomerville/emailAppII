@@ -6,6 +6,7 @@ import * as http from 'http';
 import * as net from 'net';
 import { fileURLToPath } from 'url';
 import { OAUTH_CONFIG } from '../config/config.js';
+import '../utils/attachment-handler.js';
 
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -28,6 +29,18 @@ let oauthWindow: BrowserWindow | null = null;
 let oauthServer: http.Server | null = null;
 let oauthResolve: ((value: any) => void) | null = null;
 let oauthInProgress = false;
+let googleAuthToken: any = null;
+
+// Load Google token at startup
+const tokenPath = path.join(app.getPath('userData'), 'google-token.json');
+if (fs.existsSync(tokenPath)) {
+  try {
+    googleAuthToken = JSON.parse(fs.readFileSync(tokenPath, 'utf8'));
+  } catch (e) {
+    console.error('Failed to load Google token at startup:', e);
+    googleAuthToken = null;
+  }
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -103,8 +116,8 @@ ipcMain.handle('load-email-config', async () => {
 // Google OAuth token storage
 ipcMain.handle('save-google-token', async (_event: IpcMainInvokeEvent, token: any) => {
   try {
-    const tokenPath = path.join(app.getPath('userData'), 'google-token.json');
     fs.writeFileSync(tokenPath, JSON.stringify(token, null, 2));
+    googleAuthToken = token;
     return { success: true };
   } catch (error: any) {
     console.error('Error saving Google token:', error);
@@ -139,14 +152,11 @@ ipcMain.handle('clear-google-token', async () => {
   }
 });
 
-ipcMain.handle('show-save-dialog', async () => {
+ipcMain.handle('show-save-dialog', async (_event, options) => {
   const result = await dialog.showSaveDialog(mainWindow!, {
-    title: 'Save Email',
-    defaultPath: 'email.txt',
-    filters: [
-      { name: 'Text Files', extensions: ['txt'] },
-      { name: 'All Files', extensions: ['*'] }
-    ]
+    title: options?.title || 'Save Attachment',
+    defaultPath: options?.defaultPath || 'attachment',
+    filters: options?.filters || [{ name: 'All Files', extensions: ['*'] }]
   });
   return result;
 });
@@ -1047,4 +1057,24 @@ ipcMain.handle('fetch-gmail-attachment', async (_event, { messageId, attachmentI
   }
 });
 
-// Usage: ipcRenderer.invoke('fetch-gmail-raw-message', { messageId, auth: googleAuth }) 
+// Usage: ipcRenderer.invoke('fetch-gmail-raw-message', { messageId, auth: googleAuth })
+
+// Provide token to renderer on request
+ipcMain.handle('get-google-auth', async () => {
+  return googleAuthToken;
+});
+
+ipcMain.handle('write-file', async (_event: IpcMainInvokeEvent, { filePath, buffer, mimeType }) => {
+  try {
+    // Buffer may be sent as a Uint8Array or Array, ensure it's a Buffer
+    let data = buffer;
+    if (!(buffer instanceof Buffer)) {
+      data = Buffer.from(buffer.data || buffer);
+    }
+    fs.writeFileSync(filePath, data);
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error writing file:', error);
+    return { success: false, error: error.message };
+  }
+}); 
