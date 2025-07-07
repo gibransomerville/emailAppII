@@ -2876,3 +2876,49 @@ table.structure__table {
     background: var(--sh-blue-dark);
     border-color: var(--sh-blue-dark);
 }
+
+/* Debug: Force attachment buttons and icons to be visible and styled */
+.attachment-btn, .attachment-btn i {
+  display: inline-block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  color: #333 !important;
+  font-size: 20px !important;
+  background: #fff !important;
+  border: 1px solid #ccc !important;
+  margin: 2px !important;
+  padding: 4px !important;
+}
+
+/* Improved spacing for attachment buttons */
+.attachment-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.attachment-btn, .attachment-btn i {
+  display: inline-block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  color: #333 !important;
+  font-size: 20px !important;
+  background: #fff !important;
+  border: 1px solid #ccc !important;
+  margin: 0 !important;
+  padding: 4px !important;
+  border-radius: 4px !important;
+  transition: background 0.2s, border 0.2s;
+}
+
+.attachment-btn:hover {
+  background: #f0f0f0 !important;
+  border-color: #888 !important;
+}
+
+.preview-btn {
+  background: yellow !important;
+  color: red !important;
+  border: 2px solid red !important;
+  z-index: 9999 !important;
+}

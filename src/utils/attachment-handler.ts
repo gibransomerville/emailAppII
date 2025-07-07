@@ -22,17 +22,21 @@ interface AttachmentValidationResult {
 }
 
 /**
- * Attachment Manager for lazy loading Gmail attachments
+ * Singleton manager for Gmail attachment operations
  */
-class AttachmentManager {
-    private static instance: AttachmentManager;
+class AttachmentManagerSingleton {
+    private static instance: AttachmentManagerSingleton;
     private cache: Map<string, string> = new Map();
     
-    static getInstance(): AttachmentManager {
-        if (!AttachmentManager.instance) {
-            AttachmentManager.instance = new AttachmentManager();
+    private constructor() {
+        // Private constructor to enforce singleton pattern
+    }
+    
+    static getInstance(): AttachmentManagerSingleton {
+        if (!AttachmentManagerSingleton.instance) {
+            AttachmentManagerSingleton.instance = new AttachmentManagerSingleton();
         }
-        return AttachmentManager.instance;
+        return AttachmentManagerSingleton.instance;
     }
     
     /**
@@ -90,76 +94,63 @@ class AttachmentManager {
                 (window as any).showNotification('Downloading attachment...', 'info');
             }
             
-            // Fetch content if not available
-            if (!attachment.content && attachment.attachmentId) {
+            // Get content for Gmail attachments
+            if (attachment.attachmentId && !attachment.content) {
                 try {
-                    const content = await this.fetchGmailAttachmentContent(attachment);
-                    attachment.content = content;
-                } catch (authError) {
-                    // Provide more specific error handling for authentication issues
-                    console.error('Error fetching Gmail attachment content:', authError);
-                    const errorMessage = (authError as Error).message;
-                    if (errorMessage.includes('authentication')) {
-                        if (typeof (window as any).showNotification !== 'undefined') {
-                            (window as any).showNotification('Please sign in to your Google account to download Gmail attachments.', 'warning');
-                        }
-                        return;
-                    }
-                    throw authError;
+                    attachment.content = await this.fetchGmailAttachmentContent(attachment);
+                } catch (error) {
+                    console.error('Error fetching Gmail attachment content:', error);
+                    throw error;
                 }
             }
             
             // Use regular download handler
-            AttachmentHandler.downloadAttachment(attachment);
+            await AttachmentHandler.downloadAttachment(attachment);
             
         } catch (error) {
             console.error('Error downloading attachment:', error);
             if (typeof (window as any).showNotification !== 'undefined') {
                 (window as any).showNotification('Failed to download attachment: ' + (error as Error).message, 'error');
             }
+            throw error;
         }
     }
     
     /**
      * Preview attachment with loading indicator
      */
-    async previewAttachmentWithLoading(attachment: Attachment, index: number): Promise<void> {
+    async previewAttachmentWithLoading(attachment: Attachment): Promise<void> {
         try {
             // Show loading notification
             if (typeof (window as any).showNotification !== 'undefined') {
                 (window as any).showNotification('Loading attachment preview...', 'info');
             }
             
-            // Fetch content if not available
-            if (!attachment.content && attachment.attachmentId) {
+            // Get content for Gmail attachments
+            if (attachment.attachmentId && !attachment.content) {
                 try {
-                    const content = await this.fetchGmailAttachmentContent(attachment);
-                    attachment.content = content;
-                } catch (authError) {
-                    // Provide more specific error handling for authentication issues
-                    console.error('Error fetching Gmail attachment content:', authError);
-                    const errorMessage = (authError as Error).message;
-                    if (errorMessage.includes('authentication')) {
-                        if (typeof (window as any).showNotification !== 'undefined') {
-                            (window as any).showNotification('Please sign in to your Google account to preview Gmail attachments.', 'warning');
-                        }
-                        return;
-                    }
-                    throw authError;
+                    attachment.content = await this.fetchGmailAttachmentContent(attachment);
+                } catch (error) {
+                    console.error('Error fetching Gmail attachment content:', error);
+                    throw error;
                 }
             }
             
             // Use regular preview handler
-            AttachmentHandler.previewAttachment(attachment);
+            await AttachmentHandler.previewAttachment(attachment);
             
         } catch (error) {
             console.error('Error previewing attachment:', error);
             if (typeof (window as any).showNotification !== 'undefined') {
                 (window as any).showNotification('Failed to preview attachment: ' + (error as Error).message, 'error');
             }
+            throw error;
         }
     }
 }
+
+// Export the singleton instance getter
+export const getAttachmentManager = AttachmentManagerSingleton.getInstance;
 
 /**
  * Attachment Handler Class
@@ -294,9 +285,25 @@ class AttachmentHandler {
             // Check if we need to fetch content lazily for Gmail attachments
             if (!attachment.content && attachment.attachmentId && attachment.messageId) {
                 try {
-                    const attachmentManager = AttachmentManager.getInstance();
-                    const content = await attachmentManager.fetchGmailAttachmentContent(attachment);
-                    attachment.content = content;
+                    // Get Google auth token
+                    const ipcRenderer = (window as any).require('electron').ipcRenderer;
+                    const googleAuth = await ipcRenderer.invoke('get-google-auth');
+                    if (!googleAuth) {
+                        throw new Error('Please sign in to your Google account to preview attachments.');
+                    }
+                    
+                    // Fetch attachment content using IPC
+                    const result = await ipcRenderer.invoke('fetch-gmail-attachment', {
+                        messageId: attachment.messageId,
+                        attachmentId: attachment.attachmentId,
+                        auth: googleAuth
+                    });
+                    
+                    if (!result.success) {
+                        throw new Error(result.error || 'Failed to fetch attachment content');
+                    }
+                    
+                    attachment.content = result.data;
                 } catch (authError) {
                     // If Google authentication is not available, check if we can handle this attachment another way
                     console.warn('Failed to fetch Gmail attachment content:', authError);
@@ -359,105 +366,204 @@ class AttachmentHandler {
     }
 
     /**
+     * Debug logger for attachment handling
+     */
+    static debugLog = (area: string, message: string, data?: any) => {
+        const timestamp = new Date().toISOString();
+        const prefix = `[Attachment Debug ${timestamp}]`;
+        
+        // Helper function to safely stringify circular references
+        const getCircularReplacer = () => {
+            const seen = new WeakSet();
+            return (key: string, value: any) => {
+                if (typeof value === 'object' && value !== null) {
+                    if (seen.has(value)) {
+                        return '[Circular Reference]';
+                    }
+                    seen.add(value);
+                }
+                if (value instanceof Uint8Array || value instanceof ArrayBuffer) {
+                    return `Binary data (${value.byteLength} bytes)`;
+                }
+                if (value instanceof Buffer) {
+                    return `Buffer (${value.length} bytes)`;
+                }
+                if (key === 'content') {
+                    return value ? `Content present (${typeof value})` : 'No content';
+                }
+                if (key === 'buttonElement') {
+                    return '[HTML Element]';
+                }
+                return value;
+            };
+        };
+
+        // Format data for better readability and add correlation context
+        const contextData = data ? {
+            ...data,
+            correlationContext: {
+                timestamp,
+                messageId: data.messageId || data.emailContext?.messageId || data.attachment?.messageId || 'unknown',
+                attachmentId: data.attachmentId || data.attachment?.attachmentId || 'unknown',
+                contentId: data.contentId || data.attachment?.contentId || 'unknown',
+                processingArea: area,
+                processingStage: message
+            }
+        } : null;
+
+        console.group(`${prefix} [${area}]`);
+        console.log(`${message} (${timestamp})`);
+        
+        if (contextData) {
+            try {
+                // Log each top-level property separately for better visibility
+                Object.entries(contextData).forEach(([key, value]) => {
+                    if (key === 'correlationContext') {
+                        console.log('Correlation:', value);
+                    } else {
+                        console.log(`${key}:`, JSON.stringify(value, getCircularReplacer(), 2));
+                    }
+                });
+            } catch (error) {
+                console.log('Error formatting debug data:', error);
+                console.log('Raw data:', data);
+            }
+        }
+        
+        console.groupEnd();
+    };
+
+    /**
      * Create attachment preview element
      */
     static async createAttachmentPreview(attachment: Attachment): Promise<HTMLElement> {
-        const category = this.getFileTypeCategory(attachment.contentType);
-        const previewContainer = document.createElement('div');
-        previewContainer.className = 'attachment-preview';
+        this.debugLog('Preview Creation', 'Creating preview content', {
+            type: attachment.contentType,
+            size: this.formatFileSize(attachment.size)
+        });
 
+        const container = document.createElement('div');
+        container.className = 'preview-container';
+        container.style.width = '100%';
+        container.style.height = '100%';
+        
         try {
-            const dataURL = await this.createDataURL(attachment);
-            const safeHTML = (globalThis as any).SafeHTML;
-
-            switch (category) {
-                case 'image':
-                    previewContainer.innerHTML = `
-                        <div class="image-preview">
-                            <img src="${dataURL}" alt="${safeHTML?.escapeHtml ? safeHTML.escapeHtml(attachment.filename || 'Image') : attachment.filename || 'Image'}" 
-                                 style="max-width: 100%; max-height: 300px; border-radius: 4px;"
-                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-                            <div class="image-error" style="display: none; padding: 20px; text-align: center; color: #666;">
-                                <i class="fas fa-exclamation-triangle"></i>
-                                <p>Unable to display image</p>
-                            </div>
-                        </div>
+            const fileType = this.getFileTypeCategory(attachment.contentType);
+            
+            switch (fileType) {
+                case 'pdf':
+                    this.debugLog('PDF Preview', 'Creating PDF preview');
+                    const pdfUrl = await this.createDataURL(attachment);
+                    const pdfViewer = document.createElement('iframe');
+                    pdfViewer.src = pdfUrl;
+                    pdfViewer.style.cssText = `
+                        width: 100%;
+                        height: calc(90vh - 120px);
+                        border: none;
+                        background: white;
                     `;
+                    container.appendChild(pdfViewer);
+                    break;
+
+                case 'image':
+                    this.debugLog('Image Preview', 'Creating image preview');
+                    const imgUrl = await this.createDataURL(attachment);
+                    const img = document.createElement('img');
+                    img.src = imgUrl;
+                    img.style.cssText = `
+                        max-width: 100%;
+                        max-height: calc(90vh - 120px);
+                        object-fit: contain;
+                        border-radius: 4px;
+                    `;
+                    img.alt = attachment.filename || 'Image preview';
+                    container.appendChild(img);
                     break;
 
                 case 'text':
-                    // For text files, show first few lines
-                    try {
-                        const textContent = this.decodeAttachmentData(attachment.content as string);
-                        const preview = textContent.substring(0, 500);
-                        previewContainer.innerHTML = `
-                            <div class="text-preview" style="background: #f5f5f5; padding: 15px; border-radius: 4px; font-family: monospace; white-space: pre-wrap; max-height: 200px; overflow-y: auto;">
-                                ${safeHTML?.escapeHtml ? safeHTML.escapeHtml(preview) : preview}${textContent.length > 500 ? '\n...' : ''}
-                            </div>
-                        `;
-                    } catch (error) {
-                        previewContainer.innerHTML = `<p class="preview-error">Unable to preview text content</p>`;
+                    this.debugLog('Text Preview', 'Creating text preview');
+                    const pre = document.createElement('pre');
+                    pre.style.cssText = `
+                        width: 100%;
+                        max-height: calc(90vh - 120px);
+                        overflow: auto;
+                        margin: 0;
+                        padding: 16px;
+                        background: #f8f9fa;
+                        border-radius: 4px;
+                        font-family: monospace;
+                        white-space: pre-wrap;
+                        word-break: break-word;
+                    `;
+                    
+                    let content = '';
+                    if (attachment.content) {
+                        if (typeof attachment.content === 'string') {
+                            content = attachment.content;
+                        } else if (Buffer.isBuffer(attachment.content)) {
+                            content = attachment.content.toString(attachment.encoding as BufferEncoding || 'utf8');
+                        }
                     }
-                    break;
-
-                case 'pdf':
-                    previewContainer.innerHTML = `
-                        <div class="pdf-preview">
-                            <iframe src="${dataURL}" width="100%" height="400" style="border: 1px solid #ddd; border-radius: 4px;">
-                                <p>Your browser doesn't support PDF preview. <a href="${dataURL}" download="${safeHTML?.escapeHtml ? safeHTML.escapeHtml(attachment.filename) : attachment.filename}">Download PDF</a></p>
-                            </iframe>
-                        </div>
-                    `;
-                    break;
-
-                case 'video':
-                    previewContainer.innerHTML = `
-                        <div class="video-preview">
-                            <video controls style="max-width: 100%; max-height: 300px; border-radius: 4px;">
-                                <source src="${dataURL}" type="${attachment.contentType}">
-                                Your browser doesn't support video playback.
-                            </video>
-                        </div>
-                    `;
-                    break;
-
-                case 'audio':
-                    previewContainer.innerHTML = `
-                        <div class="audio-preview">
-                            <audio controls style="width: 100%;">
-                                <source src="${dataURL}" type="${attachment.contentType}">
-                                Your browser doesn't support audio playback.
-                            </audio>
-                        </div>
-                    `;
+                    pre.textContent = content || 'No content available';
+                    container.appendChild(pre);
                     break;
 
                 default:
-                    previewContainer.innerHTML = `
-                        <div class="generic-preview" style="text-align: center; padding: 20px; color: #666;">
-                            <i class="${this.getFileIcon(attachment.contentType, attachment.filename)}" style="font-size: 48px; margin-bottom: 10px;"></i>
-                            <p>Preview not available for this file type</p>
-                        </div>
+                    this.debugLog('No Preview', 'No preview available for this file type');
+                    const noPreview = document.createElement('div');
+                    noPreview.style.cssText = `
+                        text-align: center;
+                        padding: 40px;
+                        color: #666;
                     `;
+                    noPreview.innerHTML = `
+                        <i class="${this.getFileIcon(attachment.contentType, attachment.filename)}" 
+                           style="font-size: 48px; color: #666; margin-bottom: 16px;"></i>
+                        <p style="margin: 0;">Preview not available for this file type</p>
+                        <p style="margin: 8px 0 0 0; color: #999; font-size: 14px;">${attachment.contentType}</p>
+                    `;
+                    container.appendChild(noPreview);
             }
-        } catch (error) {
-            console.error('Error creating attachment preview:', error);
-            previewContainer.innerHTML = `
-                <div class="preview-error" style="text-align: center; padding: 20px; color: #d32f2f;">
-                    <i class="fas fa-exclamation-triangle" style="font-size: 24px; margin-bottom: 10px;"></i>
-                    <p>Unable to preview attachment</p>
-                    <p style="font-size: 12px;">${(error as Error).message}</p>
-                </div>
-            `;
-        }
 
-        return previewContainer;
+            return container;
+
+        } catch (error) {
+            this.debugLog('Preview Creation', 'Error creating preview content', {
+                error: error instanceof Error ? {
+                    message: error.message,
+                    stack: error.stack
+                } : 'Unknown error'
+            });
+
+            const errorDisplay = document.createElement('div');
+            errorDisplay.style.cssText = `
+                text-align: center;
+                padding: 40px;
+                color: #d32f2f;
+            `;
+            errorDisplay.innerHTML = `
+                <i class="fas fa-exclamation-circle" style="font-size: 48px; margin-bottom: 16px;"></i>
+                <h3 style="margin: 0 0 12px 0;">Preview Error</h3>
+                <p style="margin: 0; color: #666;">${(error as Error).message}</p>
+            `;
+            return errorDisplay;
+        }
     }
 
     /**
      * Create attachment list for email
      */
     static createAttachmentList(attachments: Attachment[]): HTMLElement | null {
+        this.debugLog('Attachment List', 'Creating attachment list', {
+            count: attachments?.length || 0,
+            types: attachments?.map(a => a.contentType),
+            sizes: attachments?.map(a => this.formatFileSize(a.size)),
+            emailContext: {
+                messageId: attachments?.[0]?.messageId,
+                hasGmailAttachments: attachments?.some(a => !!a.attachmentId)
+            }
+        });
+
         if (!attachments || attachments.length === 0) {
             return null;
         }
@@ -465,24 +571,108 @@ class AttachmentHandler {
         const attachmentContainer = document.createElement('div');
         attachmentContainer.className = 'email-attachments';
         
-        const attachmentHTML = `
-            <div class="attachments-header" style="margin: 16px 0 8px 0; padding: 8px 0; border-top: 1px solid #e0e0e0;">
-                <h4 style="margin: 0; font-size: 14px; color: #5f6368; display: flex; align-items: center;">
-                    <i class="fas fa-paperclip" style="margin-right: 8px;"></i>
-                    ${attachments.length} Attachment${attachments.length > 1 ? 's' : ''}
-                </h4>
-            </div>
-            <div class="attachments-list">
-                ${attachments.map((attachment, index) => this.createAttachmentItem(attachment, index)).join('')}
-            </div>
-        `;
-
-        const safeHTML = (globalThis as any).SafeHTML;
-        if (safeHTML?.setInnerHTML) {
-            safeHTML.setInnerHTML(attachmentContainer, attachmentHTML, 'email');
-        } else {
-            attachmentContainer.innerHTML = attachmentHTML;
-        }
+        // Create header
+        const header = document.createElement('div');
+        header.className = 'attachments-header';
+        header.style.cssText = 'margin: 16px 0 8px 0; padding: 8px 0; border-top: 1px solid #e0e0e0;';
+        
+        const h4 = document.createElement('h4');
+        h4.style.cssText = 'margin: 0; font-size: 14px; color: #5f6368; display: flex; align-items: center;';
+        
+        const paperclip = document.createElement('i');
+        paperclip.className = 'fas fa-paperclip';
+        paperclip.style.marginRight = '8px';
+        
+        h4.appendChild(paperclip);
+        h4.appendChild(document.createTextNode(`${attachments.length} Attachment${attachments.length > 1 ? 's' : ''}`));
+        header.appendChild(h4);
+        
+        // Create attachments list
+        const attachmentsList = document.createElement('div');
+        attachmentsList.className = 'attachments-list';
+        
+        // Create each attachment item
+        attachments.forEach((attachment, index) => {
+            const filename = attachment.filename || `attachment_${index + 1}`;
+            const fileIcon = this.getFileIcon(attachment.contentType, filename);
+            const fileSize = this.formatFileSize(attachment.size);
+            
+            // Create attachment data
+            const attachmentData = {
+                name: attachment.filename || filename,
+                type: attachment.contentType,
+                size: attachment.size,
+                messageId: attachment.messageId,
+                attachmentId: attachment.attachmentId,
+                isInline: attachment.isInline,
+                hasContent: !!attachment.content
+            };
+            
+            // Create main button
+            const attachmentButton = document.createElement('button');
+            attachmentButton.className = 'gmail-attachment-item';
+            attachmentButton.setAttribute('data-attachment', JSON.stringify(attachmentData));
+            attachmentButton.setAttribute('data-attachment-index', String(index));
+            attachmentButton.setAttribute('title', `Click to preview ${filename}`);
+            attachmentButton.type = 'button';
+            
+            // Create name section
+            const nameDiv = document.createElement('div');
+            nameDiv.className = 'attachment-name';
+            
+            const icon = document.createElement('i');
+            icon.className = fileIcon;
+            icon.style.marginRight = '8px';
+            
+            const nameText = document.createTextNode(filename);
+            
+            const sizeSpan = document.createElement('span');
+            sizeSpan.className = 'file-size';
+            sizeSpan.textContent = `(${fileSize})`;
+            
+            nameDiv.appendChild(icon);
+            nameDiv.appendChild(nameText);
+            nameDiv.appendChild(sizeSpan);
+            
+            // Create actions section
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = 'attachment-actions';
+            
+            // Preview button
+            const previewBtn = document.createElement('button');
+            previewBtn.className = 'attachment-btn preview-btn';
+            previewBtn.setAttribute('data-action', 'preview');
+            previewBtn.setAttribute('data-attachment-index', String(index));
+            previewBtn.setAttribute('title', `Preview ${filename}`);
+            previewBtn.type = 'button';
+            
+            const previewIcon = document.createElement('i');
+            previewIcon.className = 'fas fa-eye';
+            previewBtn.appendChild(previewIcon);
+            
+            // Download button
+            const downloadBtn = document.createElement('button');
+            downloadBtn.className = 'attachment-btn download-btn';
+            downloadBtn.setAttribute('data-action', 'download');
+            downloadBtn.setAttribute('data-attachment-index', String(index));
+            downloadBtn.setAttribute('title', `Download ${filename}`);
+            downloadBtn.type = 'button';
+            
+            const downloadIcon = document.createElement('i');
+            downloadIcon.className = 'fas fa-download';
+            downloadBtn.appendChild(downloadIcon);
+            
+            actionsDiv.appendChild(previewBtn);
+            actionsDiv.appendChild(downloadBtn);
+            
+            // Assemble attachment item
+            attachmentButton.appendChild(nameDiv);
+            attachmentButton.appendChild(actionsDiv);
+            attachmentsList.appendChild(attachmentButton);
+        });
+        
+        attachmentContainer.appendChild(header);
+        attachmentContainer.appendChild(attachmentsList);
         
         // Add event listeners for attachment actions
         this.addAttachmentEventListeners(attachmentContainer, attachments);
@@ -491,75 +681,139 @@ class AttachmentHandler {
     }
 
     /**
-     * Create individual attachment item
-     */
-    static createAttachmentItem(attachment: Attachment, index: number): string {
-        const filename = attachment.filename || `attachment_${index + 1}`;
-        const safeHTML = (globalThis as any).SafeHTML;
-
-        return `
-            <div class="gmail-attachment-item" data-attachment-index="${index}">
-                <div class="attachment-name">
-                    ${safeHTML?.escapeHtml ? safeHTML.escapeHtml(filename) : filename}
-                </div>
-                <button class="attachment-btn download-btn" data-attachment-index="${index}" title="Download ${safeHTML?.escapeHtml ? safeHTML.escapeHtml(filename) : filename}">
-                    <i class="fas fa-download"></i>
-                </button>
-            </div>
-        `;
-    }
-
-    /**
      * Add event listeners for attachment actions
      */
     static addAttachmentEventListeners(container: HTMLElement, attachments: Attachment[]): void {
-        // Preview buttons
-        const previewButtons = container.querySelectorAll('.attachment-preview-btn');
-        previewButtons.forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-                e.preventDefault();
-                const index = parseInt((btn as HTMLElement).dataset.attachmentIndex || '0');
-                const attachment = attachments[index];
+        this.debugLog('Event Listeners', 'Adding attachment event listeners', {
+            containerClass: container.className,
+            attachmentCount: attachments.length,
+            types: attachments.map(a => a.contentType)
+        });
+
+        // Helper function to get attachment data
+        const getAttachmentFromElement = (element: HTMLElement): Attachment | null => {
+            const attachmentItem = element.closest('.gmail-attachment-item') as HTMLElement;
+            if (!attachmentItem) return null;
+            
+            try {
+                const attachmentData = attachmentItem.dataset.attachment;
+                if (!attachmentData) return null;
                 
-                try {
-                    // Use lazy loading for Gmail attachments
-                    if (attachment.attachmentId && !attachment.content) {
-                        // AttachmentManager will be available from renderer.js
-                        const attachmentManager = AttachmentManager.getInstance();
-                        await attachmentManager.previewAttachmentWithLoading(attachment, index);
-                    } else {
-                        await this.previewAttachment(attachment);
-                    }
-                } catch (error) {
-                    console.error('Error previewing attachment:', error);
-                    if (typeof (window as any).showNotification !== 'undefined') {
-                        (window as any).showNotification('Failed to preview attachment: ' + (error as Error).message, 'error');
-                    }
+                this.debugLog('Data Parse', 'Parsing attachment data', { raw: attachmentData });
+                return JSON.parse(attachmentData);
+            } catch (error) {
+                console.error('Error parsing attachment data:', error);
+                return null;
+            }
+        };
+
+        // Attachment item clicks for preview
+        const attachmentItems = container.querySelectorAll('.gmail-attachment-item');
+        console.log('Found attachment items:', attachmentItems.length);
+        this.debugLog('Event Binding', `Found ${attachmentItems.length} attachment items to bind`);
+
+        // Add a click handler to the container itself for event delegation
+        container.addEventListener('click', async (e) => {
+            const target = e.target as HTMLElement;
+            const attachmentItem = target.closest('.gmail-attachment-item') as HTMLElement;
+            
+            console.log('Container click detected:', {
+                target: target.tagName,
+                className: target.className,
+                attachmentItem: attachmentItem?.tagName,
+                attachmentItemClass: attachmentItem?.className
+            });
+
+            if (!attachmentItem) return;
+            
+            // Don't trigger if clicking action buttons
+            if (target.closest('.attachment-actions')) {
+                console.log('Action button clicked, skipping main handler');
+                return;
+            }
+
+            const attachment = getAttachmentFromElement(attachmentItem);
+            if (!attachment) {
+                console.error('Could not find attachment data');
+                return;
+            }
+
+            console.log('Processing attachment click:', attachment);
+            
+            try {
+                // Use lazy loading for Gmail attachments
+                if (attachment.attachmentId && !attachment.content) {
+                    const attachmentManager = AttachmentManagerSingleton.getInstance();
+                    await attachmentManager.previewAttachmentWithLoading(attachment);
+                } else {
+                    await this.previewAttachment(attachment);
                 }
+            } catch (error) {
+                console.error('Error handling attachment click:', error);
+                if (typeof (window as any).showNotification !== 'undefined') {
+                    (window as any).showNotification('Failed to preview attachment: ' + (error as Error).message, 'error');
+                }
+            }
+        });
+
+        // Individual item event listeners for debugging
+        attachmentItems.forEach((item, idx) => {
+            console.log('Setting up click handler for item:', idx, item.outerHTML);
+            this.debugLog('Event Binding', `Binding click handler to item ${idx}`, {
+                className: item.className,
+                dataIndex: (item as HTMLElement).dataset.attachmentIndex
+            });
+
+            // Add click handler for debugging purposes
+            item.addEventListener('click', (e) => {
+                console.log('Direct item click detected:', {
+                    index: idx,
+                    target: (e.target as HTMLElement).tagName,
+                    currentTarget: (e.currentTarget as HTMLElement).tagName,
+                    className: item.className
+                });
             });
         });
 
-        // Download buttons
-        const downloadButtons = container.querySelectorAll('.attachment-download-btn');
-        downloadButtons.forEach(btn => {
+        // Action buttons (preview and download)
+        const actionButtons = container.querySelectorAll('.attachment-btn');
+        this.debugLog('Event Binding', `Found ${actionButtons.length} action buttons to bind`);
+        
+        actionButtons.forEach((btn, idx) => {
+            const action = (btn as HTMLElement).dataset.action;
+            this.debugLog('Event Binding', `Binding click handler to ${action} button ${idx}`, {
+                className: btn.className,
+                action,
+                dataIndex: (btn as HTMLElement).dataset.attachmentIndex
+            });
+
             btn.addEventListener('click', async (e) => {
                 e.preventDefault();
-                const index = parseInt((btn as HTMLElement).dataset.attachmentIndex || '0');
-                const attachment = attachments[index];
+                e.stopPropagation();
+                
+                const attachment = getAttachmentFromElement(e.target as HTMLElement);
+                if (!attachment) {
+                    console.error('Could not find attachment data');
+                    return;
+                }
+                
+                this.debugLog('Button Click', `${action} button clicked`, {
+                    attachment,
+                    action
+                });
                 
                 try {
-                    // Use lazy loading for Gmail attachments
-                    if (attachment.attachmentId && !attachment.content) {
-                        // AttachmentManager will be available from renderer.js
-                        const attachmentManager = AttachmentManager.getInstance();
+                    const attachmentManager = AttachmentManagerSingleton.getInstance();
+                    
+                    if (action === 'preview') {
+                        await attachmentManager.previewAttachmentWithLoading(attachment);
+                    } else if (action === 'download') {
                         await attachmentManager.downloadAttachmentWithLoading(attachment);
-                    } else {
-                        await this.downloadAttachment(attachment);
                     }
                 } catch (error) {
-                    console.error('Error downloading attachment:', error);
+                    console.error(`Error ${action}ing attachment:`, error);
                     if (typeof (window as any).showNotification !== 'undefined') {
-                        (window as any).showNotification('Failed to download attachment: ' + (error as Error).message, 'error');
+                        (window as any).showNotification(`Failed to ${action} attachment: ` + (error as Error).message, 'error');
                     }
                 }
             });
@@ -570,16 +824,47 @@ class AttachmentHandler {
      * Preview attachment in modal
      */
     static async previewAttachment(attachment: Attachment): Promise<void> {
+        const startTime = performance.now();
+        
+        this.debugLog('Preview Start', 'Starting attachment preview', {
+            filename: attachment.filename,
+            type: attachment.contentType,
+            size: this.formatFileSize(attachment.size),
+            hasContent: !!attachment.content,
+            hasAttachmentId: !!attachment.attachmentId,
+            messageId: attachment.messageId,
+            contentId: attachment.contentId,
+            isInline: attachment.isInline
+        });
+
         try {
             const modal = await this.createPreviewModal(attachment);
             document.body.appendChild(modal);
             
-            // Show modal
-            setTimeout(() => {
-                modal.classList.add('show');
-            }, 10);
+            // Show modal with animation
+            requestAnimationFrame(() => {
+                modal.style.opacity = '1';
+                const modalContent = modal.querySelector('.modal-content') as HTMLElement;
+                if (modalContent) {
+                    modalContent.style.transform = 'translateY(0)';
+                }
+            });
 
         } catch (error) {
+            const endTime = performance.now();
+            this.debugLog('Preview Error', 'Error in preview process', {
+                error: error instanceof Error ? {
+                    message: error.message,
+                    stack: error.stack
+                } : 'Unknown error',
+                processingTime: `${(endTime - startTime).toFixed(2)}ms`,
+                attachment: {
+                    filename: attachment.filename,
+                    type: attachment.contentType,
+                    size: this.formatFileSize(attachment.size)
+                }
+            });
+            
             console.error('Error previewing attachment:', error);
             if (typeof (window as any).showNotification !== 'undefined') {
                 (window as any).showNotification('Unable to preview attachment: ' + (error as Error).message, 'error');
@@ -587,121 +872,6 @@ class AttachmentHandler {
                 alert('Unable to preview attachment: ' + (error as Error).message);
             }
         }
-    }
-
-    /**
-     * Create preview modal
-     */
-    static async createPreviewModal(attachment: Attachment): Promise<HTMLElement> {
-        const modal = document.createElement('div');
-        modal.className = 'attachment-preview-modal';
-        modal.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.8);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 10000;
-            opacity: 0;
-            transition: opacity 0.3s ease;
-        `;
-        
-        try {
-            const previewContent = await this.createAttachmentPreview(attachment);
-            
-            const modalContent = document.createElement('div');
-            modalContent.className = 'modal-content';
-            modalContent.style.cssText = `
-                background: white;
-                border-radius: 8px;
-                max-width: 90%;
-                max-height: 90%;
-                overflow: auto;
-                position: relative;
-                padding: 20px;
-            `;
-            
-            // Add close button
-            const closeBtn = document.createElement('button');
-            closeBtn.innerHTML = '×';
-            closeBtn.style.cssText = `
-                position: absolute;
-                top: 10px;
-                right: 15px;
-                background: none;
-                border: none;
-                font-size: 24px;
-                cursor: pointer;
-                color: #666;
-            `;
-            
-            closeBtn.addEventListener('click', () => {
-                modal.classList.remove('show');
-                setTimeout(() => modal.remove(), 300);
-            });
-            
-            // Add header
-            const header = document.createElement('div');
-            header.style.cssText = `
-                margin-bottom: 15px;
-                padding-bottom: 10px;
-                border-bottom: 1px solid #eee;
-            `;
-            
-            const safeHTML = (globalThis as any).SafeHTML;
-            const fileName = safeHTML?.escapeHtml ? safeHTML.escapeHtml(attachment.filename || 'Attachment') : attachment.filename || 'Attachment';
-            const fileSize = this.formatFileSize(attachment.size);
-            
-            header.innerHTML = `
-                <h3 style="margin: 0; color: #333;">${fileName}</h3>
-                <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">${attachment.contentType} • ${fileSize}</p>
-            `;
-            
-            modalContent.appendChild(closeBtn);
-            modalContent.appendChild(header);
-            modalContent.appendChild(previewContent);
-            modal.appendChild(modalContent);
-            
-        } catch (error) {
-            console.error('Error creating preview modal content:', error);
-            modal.innerHTML = `
-                <div style="color: white; text-align: center; padding: 20px;">
-                    <h3>Preview Error</h3>
-                    <p>${(error as Error).message}</p>
-                    <button onclick="this.parentElement.parentElement.remove()" style="background: #d32f2f; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">Close</button>
-                </div>
-            `;
-        }
-        
-        // Close on backdrop click
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.classList.remove('show');
-                setTimeout(() => modal.remove(), 300);
-            }
-        });
-
-        // Close on escape key
-        const handleEscape = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') {
-                modal.classList.remove('show');
-                setTimeout(() => modal.remove(), 300);
-                document.removeEventListener('keydown', handleEscape);
-            }
-        };
-        document.addEventListener('keydown', handleEscape);
-
-        // Add show class for CSS transition
-        modal.style.opacity = '0';
-        setTimeout(() => {
-            modal.style.opacity = '1';
-        }, 10);
-
-        return modal;
     }
 
     /**
@@ -729,7 +899,7 @@ class AttachmentHandler {
 
             // Handle Gmail attachments
             if (attachment.attachmentId && !attachment.content) {
-                const manager = AttachmentManager.getInstance();
+                const manager = AttachmentManagerSingleton.getInstance();
                 await manager.downloadAttachmentWithLoading(attachment);
                 return;
             }
@@ -810,6 +980,204 @@ class AttachmentHandler {
         console.log('AttachmentHandler initialized successfully');
         return true;
     }
+
+    /**
+     * Create preview modal
+     */
+    private static async createPreviewModal(attachment: Attachment): Promise<HTMLElement> {
+        this.debugLog('Modal Creation', 'Creating preview modal', {
+            attachment: {
+                name: attachment.filename || attachment.name,
+                type: attachment.contentType,
+                size: this.formatFileSize(attachment.size)
+            }
+        });
+
+        // Create modal container
+        const modal = document.createElement('div');
+        modal.className = 'attachment-preview-modal';
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-labelledby', 'preview-title');
+        
+        // Add modal styles
+        modal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.75);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            opacity: 0;
+            transition: opacity 0.2s ease-in-out;
+        `;
+
+        try {
+            // Create modal content container
+            const modalContent = document.createElement('div');
+            modalContent.className = 'modal-content';
+            modalContent.style.cssText = `
+                background: white;
+                border-radius: 12px;
+                max-width: 90%;
+                max-height: 90vh;
+                width: ${this.getFileTypeCategory(attachment.contentType) === 'pdf' ? '90%' : 'auto'};
+                overflow: hidden;
+                position: relative;
+                box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
+                display: flex;
+                flex-direction: column;
+                min-width: 320px;
+                transform: translateY(20px);
+                transition: transform 0.2s ease-in-out;
+            `;
+
+            // Create header
+            const header = document.createElement('div');
+            header.style.cssText = `
+                padding: 16px 20px;
+                border-bottom: 1px solid #eee;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                background: #f8f9fa;
+            `;
+
+            // Create title section
+            const titleSection = document.createElement('div');
+            const fileName = attachment.filename || attachment.name || 'Attachment';
+            const fileSize = this.formatFileSize(attachment.size);
+            const fileIcon = this.getFileIcon(attachment.contentType, attachment.filename);
+            
+            titleSection.innerHTML = `
+                <h3 id="preview-title" style="margin: 0; font-size: 16px; color: #333; display: flex; align-items: center; gap: 8px;">
+                    <i class="${fileIcon}" aria-hidden="true" style="font-size: 20px; color: #666;"></i>
+                    <span style="word-break: break-word; max-width: 500px; overflow: hidden; text-overflow: ellipsis;">${fileName}</span>
+                </h3>
+                <p style="margin: 4px 0 0 28px; color: #666; font-size: 13px;">${fileSize} • ${attachment.contentType}</p>
+            `;
+
+            // Create actions section
+            const actions = document.createElement('div');
+            actions.style.cssText = `
+                display: flex;
+                gap: 8px;
+                align-items: center;
+            `;
+
+            // Create download button
+            const downloadBtn = document.createElement('button');
+            downloadBtn.innerHTML = '<i class="fas fa-download" aria-hidden="true"></i>';
+            downloadBtn.title = 'Download';
+            downloadBtn.setAttribute('aria-label', 'Download attachment');
+            downloadBtn.style.cssText = `
+                background: #f0f0f0;
+                border: none;
+                border-radius: 6px;
+                padding: 8px;
+                cursor: pointer;
+                color: #444;
+                transition: all 0.2s ease;
+            `;
+            downloadBtn.addEventListener('mouseover', () => downloadBtn.style.background = '#e0e0e0');
+            downloadBtn.addEventListener('mouseout', () => downloadBtn.style.background = '#f0f0f0');
+            downloadBtn.addEventListener('click', () => this.downloadAttachment(attachment));
+
+            // Create close button
+            const closeBtn = document.createElement('button');
+            closeBtn.innerHTML = '<i class="fas fa-times" aria-hidden="true"></i>';
+            closeBtn.title = 'Close';
+            closeBtn.setAttribute('aria-label', 'Close preview');
+            closeBtn.style.cssText = `
+                background: #f0f0f0;
+                border: none;
+                border-radius: 6px;
+                padding: 8px;
+                cursor: pointer;
+                color: #444;
+                transition: all 0.2s ease;
+            `;
+            closeBtn.addEventListener('mouseover', () => closeBtn.style.background = '#e0e0e0');
+            closeBtn.addEventListener('mouseout', () => closeBtn.style.background = '#f0f0f0');
+
+            // Create preview content
+            const previewContent = await this.createAttachmentPreview(attachment);
+            const previewContainer = document.createElement('div');
+            previewContainer.style.cssText = `
+                flex: 1;
+                overflow: auto;
+                padding: 20px;
+                display: flex;
+                justify-content: center;
+                align-items: flex-start;
+                background: ${this.getFileTypeCategory(attachment.contentType) === 'image' ? '#f0f0f0' : 'white'};
+            `;
+            previewContainer.appendChild(previewContent);
+
+            // Assemble modal
+            actions.appendChild(downloadBtn);
+            actions.appendChild(closeBtn);
+            header.appendChild(titleSection);
+            header.appendChild(actions);
+            modalContent.appendChild(header);
+            modalContent.appendChild(previewContainer);
+            modal.appendChild(modalContent);
+
+            // Add close handlers
+            const closeModal = () => {
+                modal.style.opacity = '0';
+                modalContent.style.transform = 'translateY(20px)';
+                setTimeout(() => modal.remove(), 200);
+            };
+
+            closeBtn.addEventListener('click', closeModal);
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) closeModal();
+            });
+
+            // Add keyboard navigation
+            const handleKeyDown = (e: KeyboardEvent) => {
+                if (e.key === 'Escape') {
+                    closeModal();
+                }
+            };
+            document.addEventListener('keydown', handleKeyDown);
+
+            // Clean up event listeners when modal is closed
+            const cleanup = () => {
+                document.removeEventListener('keydown', handleKeyDown);
+                modal.remove();
+            };
+            modal.addEventListener('remove', cleanup);
+
+            // Focus management
+            setTimeout(() => closeBtn.focus(), 100);
+
+            this.debugLog('Modal Creation', 'Preview modal created successfully', {
+                type: attachment.contentType,
+                size: this.formatFileSize(attachment.size),
+                modalDimensions: {
+                    width: modalContent.offsetWidth,
+                    height: modalContent.offsetHeight
+                }
+            });
+
+            return modal;
+
+        } catch (error) {
+            this.debugLog('Modal Creation', 'Error creating preview modal', {
+                error: error instanceof Error ? {
+                    message: error.message,
+                    stack: error.stack
+                } : 'Unknown error'
+            });
+            throw error;
+        }
+    }
 }
 
 // Legacy function exports for backward compatibility
@@ -840,7 +1208,7 @@ function getFileTypeCategory(mimeType: string): FileTypeCategory {
 // Make AttachmentHandler and AttachmentManager available globally
 if (typeof window !== 'undefined') {
     (window as any).AttachmentHandler = AttachmentHandler;
-    (window as any).AttachmentManager = AttachmentManager;
+    (window as any).AttachmentManager = AttachmentManagerSingleton;
     
     // Legacy function exports
     (window as any).createAttachmentList = createAttachmentList;
@@ -900,7 +1268,7 @@ if (typeof window !== 'undefined') {
 }
 
 // Export the AttachmentHandler class and helper functions
-export { AttachmentHandler, AttachmentManager };
+export { AttachmentHandler, AttachmentManagerSingleton };
 
 // Export helper functions for direct use
 export {

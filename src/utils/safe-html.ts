@@ -24,6 +24,7 @@ declare global {
     sanitize(dirty: string, config?: any): string;
     addHook(hook: string, callback: (node: Node) => void): void;
     removeHooks(hook: string): void;
+    setConfig(config: any): void;
   };
 }
 
@@ -226,6 +227,10 @@ export class SafeHTML {
             const errorMsg = `SafeHTML module cannot initialize due to missing dependencies: ${validation.missingDependencies.join(', ')}`;
             throw new Error(errorMsg);
         }
+        
+        // Set DOMPurify config
+        DOMPurify.setConfig(DOMPURIFY_CONFIG);
+        console.log('SafeHTML: DOMPurify configured with custom settings');
         
         console.log('SafeHTML module initialized successfully');
         return true;

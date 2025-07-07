@@ -42,10 +42,10 @@ class EmailRenderer {
         // Create bound handler
         const boundClickHandler = (event: MouseEvent) => {
             const target = event.target as HTMLElement;
-            const downloadButton = target.closest('.download-btn') as HTMLElement | null;
+            const actionButton = target.closest('.attachment-btn') as HTMLElement | null;
             
-            // Only proceed if we clicked on or within a download button
-            if (!downloadButton) {
+            // Only proceed if we clicked on or within an attachment button
+            if (!actionButton) {
                 return;
             }
 
@@ -53,22 +53,45 @@ class EmailRenderer {
             event.stopPropagation();
             event.preventDefault();
             
-            console.debug('[DEBUG] Download button clicked', downloadButton);
-            this.handleAttachmentClick(downloadButton);
+            console.debug('[DEBUG] Attachment button clicked', {
+                button: actionButton,
+                action: actionButton.getAttribute('data-action'),
+                attachmentIndex: actionButton.getAttribute('data-attachment-index')
+            });
+
+            // Ensure AttachmentHandler is available
+            if (!(window as any).AttachmentHandler) {
+                console.error('AttachmentHandler not available');
+                if (typeof (window as any).showNotification !== 'undefined') {
+                    (window as any).showNotification('Attachment handling is not available', 'error');
+                }
+                return;
+            }
+
+            this.handleAttachmentClick(actionButton);
         };
 
-        // Remove existing listener if it exists
+        // Remove any existing listeners to prevent duplicates
         document.removeEventListener('click', boundClickHandler);
         
         // Add event delegation for attachment buttons
-        document.addEventListener('click', boundClickHandler);
+        document.addEventListener('click', boundClickHandler, true); // Use capture phase
+        
+        console.log('Attachment event listeners set up');
     }
 
     /**
      * Handle attachment button clicks
      */
     private handleAttachmentClick(button: HTMLElement): void {
-        console.debug('[DEBUG] handleAttachmentClick called with button:', button);
+        // Debug logging
+        if ((window as any).AttachmentHandler?.debugLog) {
+            (window as any).AttachmentHandler.debugLog('EmailRenderer', 'handleAttachmentClick called with button', {
+                buttonElement: button.outerHTML,
+                action: button.getAttribute('data-action'),
+                attachmentIndex: button.getAttribute('data-attachment-index')
+            });
+        }
         
         // Prevent double-clicks while loading
         if (button.hasAttribute('data-loading')) {
@@ -77,8 +100,6 @@ class EmailRenderer {
         
         const action = button.getAttribute('data-action');
         const attachmentIndex = button.getAttribute('data-attachment-index');
-        
-        console.debug('[DEBUG] Attachment action:', action, 'Attachment index:', attachmentIndex);
         
         if (!action || attachmentIndex === null) {
             console.warn('[DEBUG] Missing action or attachment index', { action, attachmentIndex });
@@ -102,141 +123,85 @@ class EmailRenderer {
         try {
             const attachmentData = JSON.parse(attachmentDataStr);
             
-            // Handle download action with fallback
-            if (action === 'download') {
-                // Set loading state
-                button.setAttribute('data-loading', 'true');
-                button.style.opacity = '0.7';
-                button.style.cursor = 'wait';
-                
-                console.debug('[DEBUG] Download action detected, calling handleDownloadAttachment', attachmentData);
-                this.handleDownloadAttachment(attachmentData)
-                    .finally(() => {
-                        // Reset loading state
-                        button.removeAttribute('data-loading');
-                        button.style.removeProperty('opacity');
-                        button.style.removeProperty('cursor');
-                    });
-            } else {
-                // Call the appropriate AttachmentHandler method for other actions
-                if ((window as any).AttachmentHandler) {
-                    (async () => {
-                        try {
-                            switch (action) {
-                                case 'preview':
-                                    await (window as any).AttachmentHandler.previewAttachment(attachmentData);
-                                    break;
-                                case 'openInCloud':
-                                    (window as any).AttachmentHandler.openInCloud(attachmentData);
-                                    break;
-                                case 'delete':
-                                    (window as any).AttachmentHandler.deleteAttachment(attachmentData);
-                                    break;
-                            }
-                        } catch (error) {
-                            console.error('Error handling attachment action:', error);
-                            if (typeof (window as any).showNotification !== 'undefined') {
-                                (window as any).showNotification('Failed to perform attachment action: ' + (error as Error).message, 'error');
-                            }
-                        }
-                    })();
-                }
+            // Debug logging
+            if ((window as any).AttachmentHandler?.debugLog) {
+                (window as any).AttachmentHandler.debugLog('EmailRenderer', 'Attachment data parsed', {
+                    filename: attachmentData.filename || attachmentData.name,
+                    type: attachmentData.contentType,
+                    size: attachmentData.size,
+                    messageId: attachmentData.messageId,
+                    attachmentId: attachmentData.attachmentId,
+                    contentId: attachmentData.contentId,
+                    isInline: attachmentData.isInline
+                });
             }
+            
+            // Set loading state
+            button.setAttribute('data-loading', 'true');
+            button.style.opacity = '0.7';
+            button.style.cursor = 'wait';
+
+            // Get AttachmentManager instance
+            const attachmentManager = (window as any).AttachmentManager?.getInstance();
+            
+            // Call the appropriate handler
+            (async () => {
+                try {
+                    switch (action) {
+                        case 'preview':
+                            if (attachmentManager) {
+                                await attachmentManager.previewAttachmentWithLoading(attachmentData);
+                            } else {
+                                await (window as any).AttachmentHandler.previewAttachment(attachmentData);
+                            }
+                            break;
+                        case 'download':
+                            if (attachmentManager) {
+                                await attachmentManager.downloadAttachmentWithLoading(attachmentData);
+                            } else {
+                                await (window as any).AttachmentHandler.downloadAttachment(attachmentData);
+                            }
+                            break;
+                    }
+                } catch (error) {
+                    if ((window as any).AttachmentHandler?.debugLog) {
+                        (window as any).AttachmentHandler.debugLog('EmailRenderer', 'Error handling attachment action', {
+                            error: error instanceof Error ? {
+                                message: error.message,
+                                stack: error.stack
+                            } : 'Unknown error',
+                            attachmentData
+                        });
+                    }
+                    console.error('Error handling attachment action:', error);
+                    if (typeof (window as any).showNotification !== 'undefined') {
+                        (window as any).showNotification('Failed to perform attachment action: ' + (error as Error).message, 'error');
+                    }
+                } finally {
+                    // Reset loading state
+                    button.removeAttribute('data-loading');
+                    button.style.removeProperty('opacity');
+                    button.style.removeProperty('cursor');
+                }
+            })();
         } catch (error) {
+            if ((window as any).AttachmentHandler?.debugLog) {
+                (window as any).AttachmentHandler.debugLog('EmailRenderer', 'Error handling attachment click', {
+                    error: error instanceof Error ? {
+                        message: error.message,
+                        stack: error.stack
+                    } : 'Unknown error',
+                    buttonData: {
+                        action,
+                        attachmentIndex,
+                        attachmentDataStr
+                    }
+                });
+            }
             console.error('Error handling attachment click:', error);
             button.removeAttribute('data-loading');
             button.style.removeProperty('opacity');
             button.style.removeProperty('cursor');
-        }
-    }
-
-    /**
-     * Handle attachment download with fallback logic
-     * @param attachmentData - Attachment data object
-     */
-    private async handleDownloadAttachment(attachmentData: any): Promise<void> {
-        console.debug('[DEBUG] handleDownloadAttachment called', attachmentData);
-        try {
-            // First try using AttachmentHandler if available
-            if ((window as any).AttachmentHandler) {
-                await (window as any).AttachmentHandler.downloadAttachment(attachmentData);
-                return;
-            }
-            
-            // Fallback: handle Gmail attachments with lazy loading
-            if (attachmentData.attachmentId && attachmentData.messageId && !attachmentData.content) {
-                // Use AttachmentHandler for Gmail attachments
-                const AttachmentHandler = (window as any).AttachmentHandler || (await import('../utils/attachment-handler.js')).AttachmentHandler;
-                if (AttachmentHandler) {
-                    await AttachmentHandler.downloadAttachment(attachmentData);
-                    return;
-                }
-            }
-            
-            // Final fallback: simple download using existing content
-            if (attachmentData.content) {
-                this.downloadAttachmentContent(attachmentData);
-            } else {
-                throw new Error('No attachment content or download mechanism available');
-            }
-            
-        } catch (error) {
-            console.error('Error downloading attachment:', error);
-            if (typeof (window as any).showNotification !== 'undefined') {
-                (window as any).showNotification('Failed to download attachment: ' + (error as Error).message, 'error');
-            } else {
-                alert('Failed to download attachment: ' + (error as Error).message);
-            }
-        }
-    }
-
-    /**
-     * Download attachment content directly
-     * @param attachmentData - Attachment data object
-     */
-    private downloadAttachmentContent(attachmentData: any): void {
-        try {
-            let dataURL: string;
-            
-            if (attachmentData.content) {
-                // Create data URL from content
-                const contentType = attachmentData.contentType || 'application/octet-stream';
-                const content = attachmentData.content;
-                
-                if (typeof content === 'string') {
-                    // Assume base64 encoded
-                    dataURL = `data:${contentType};base64,${content}`;
-                } else if (content instanceof ArrayBuffer) {
-                    // Convert ArrayBuffer to base64
-                    const bytes = new Uint8Array(content);
-                    const binary = bytes.reduce((data, byte) => data + String.fromCharCode(byte), '');
-                    const base64 = btoa(binary);
-                    dataURL = `data:${contentType};base64,${base64}`;
-                } else {
-                    throw new Error('Unsupported content type');
-                }
-            } else {
-                throw new Error('No content available for download');
-            }
-            
-            // Create temporary download link
-            const link = document.createElement('a');
-            link.href = dataURL;
-            link.download = attachmentData.filename || attachmentData.name || 'attachment';
-            
-            // Trigger download
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            
-            // Show success notification
-            if (typeof (window as any).showNotification !== 'undefined') {
-                (window as any).showNotification(`Downloaded ${attachmentData.filename || 'attachment'}`, 'success');
-            }
-            
-        } catch (error) {
-            console.error('Error downloading attachment content:', error);
-            throw error;
         }
     }
 
@@ -713,35 +678,102 @@ class EmailRenderer {
      * Render a list of attachments with minimalistic design
      */
     renderAttachmentList(attachments: any[]): string {
-        // Fallback HTML escape function
-        const escapeHtml = (str: string) => {
-            const div = document.createElement('div');
-            div.textContent = str;
-            return div.innerHTML;
-        };
-        const safeEscape = (window as any).SafeHTML && typeof (window as any).SafeHTML.escape === 'function'
-            ? (window as any).SafeHTML.escape
-            : escapeHtml;
+        if ((window as any).AttachmentHandler?.debugLog) {
+            (window as any).AttachmentHandler.debugLog('EmailRenderer', 'Starting attachment list rendering', {
+                summary: {
+                    totalCount: attachments?.length || 0,
+                    totalSize: attachments?.reduce((sum, att) => sum + (att.size || 0), 0),
+                    types: [...new Set(attachments?.map(a => a.contentType))],
+                    inlineCount: attachments?.filter(a => a.isInline).length || 0,
+                    hasGmailAttachments: attachments?.some(a => !!a.attachmentId) || false
+                }
+            });
+        }
 
         if (!attachments || attachments.length === 0) {
+            if ((window as any).AttachmentHandler?.debugLog) {
+                (window as any).AttachmentHandler.debugLog('EmailRenderer', 'No attachments to render', {
+                    reason: !attachments ? 'attachments is null/undefined' : 'attachments array is empty'
+                });
+            }
             return '<div class="no-attachments">No attachments</div>';
         }
 
-        return `
+        const renderedHtml = `
             <div class="attachment-list">
                 ${attachments.map((att, index) => {
-                    const safeName = safeEscape(att.name || att.filename || 'attachment');
-                    const attachmentData = escapeHtml(JSON.stringify(att));
+                    if ((window as any).AttachmentHandler?.debugLog) {
+                        (window as any).AttachmentHandler.debugLog('EmailRenderer', `Processing attachment ${index}`, {
+                            attachment: {
+                                name: att.name || att.filename,
+                                type: att.contentType,
+                                size: att.size,
+                                messageId: att.messageId,
+                                attachmentId: att.attachmentId,
+                                contentId: att.contentId,
+                                isInline: att.isInline,
+                                hasContent: !!att.content,
+                                index
+                            },
+                            renderDetails: {
+                                fileType: (window as any).AttachmentHandler?.getFileTypeCategory?.(att.contentType) || 'unknown',
+                                icon: (window as any).AttachmentHandler?.getFileIcon?.(att.contentType, att.filename) || 'fas fa-file',
+                                formattedSize: (window as any).AttachmentHandler?.formatFileSize?.(att.size) || `${att.size} bytes`
+                            }
+                        });
+                    }
 
-                    return `<div class="gmail-attachment-item" data-attachment='${attachmentData}' data-attachment-index="${index}">
+                    // Prepare attachment data for data attribute
+                    const attachmentData = {
+                        name: att.name || att.filename || 'attachment',
+                        filename: att.filename || att.name || 'attachment',
+                        contentType: att.contentType || 'application/octet-stream',
+                        size: att.size || 0,
+                        messageId: att.messageId,
+                        attachmentId: att.attachmentId,
+                        contentId: att.contentId,
+                        isInline: !!att.isInline,
+                        content: att.content
+                    };
+
+                    // Safely escape the attachment data and name
+                    const safeAttachmentData = this.escapeHtml(JSON.stringify(attachmentData)).replace(/'/g, '&#39;');
+                    const safeName = this.escapeHtml(attachmentData.name);
+
+                    return `<div class="gmail-attachment-item" data-attachment='${safeAttachmentData}' data-attachment-index="${index}">
                         <div class="attachment-name" title="${safeName}">${safeName}</div>
-                        <button class="attachment-btn download-btn" data-action="download" data-attachment-index="${index}" title="Download ${safeName}">
-                            <i class="fas fa-download"></i>
-                        </button>
+                        <div class="attachment-actions">
+                            <button type="button" class="attachment-btn preview-btn" data-action="preview" data-attachment-index="${index}" title="Preview ${safeName}" style="background: none; border: none; padding: 0; margin: 0; cursor: pointer; display: inline-block;">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                            <button type="button" class="attachment-btn download-btn" data-action="download" data-attachment-index="${index}" title="Download ${safeName}" style="background: none; border: none; padding: 0; margin: 0; cursor: pointer; display: inline-block;">
+                                <i class="fas fa-download"></i>
+                            </button>
+                        </div>
                     </div>`;
                 }).join('')}
             </div>
         `;
+
+        if ((window as any).AttachmentHandler?.debugLog) {
+            (window as any).AttachmentHandler.debugLog('EmailRenderer', 'Attachment list rendering completed', {
+                renderedItemCount: attachments.length,
+                htmlLength: renderedHtml.length,
+                summary: {
+                    totalAttachments: attachments.length,
+                    totalSize: attachments.reduce((sum, att) => sum + (att.size || 0), 0),
+                    uniqueTypes: [...new Set(attachments.map(a => a.contentType))],
+                    inlineCount: attachments.filter(a => a.isInline).length
+                }
+            });
+        }
+
+        // Use email sanitization mode for attachments
+        const sanitized = (window as any).SafeHTML.sanitizeEmail(renderedHtml, {
+            ADD_ATTR: ['type', 'data-action', 'data-attachment-index', 'data-attachment', 'style']
+        });
+        console.log('[DEBUG] Sanitized attachment HTML:', sanitized);
+        return sanitized;
     }
 }
 

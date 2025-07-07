@@ -49,16 +49,17 @@ export const DOMPURIFY_CONFIG: DOMPurifyConfig = {
     ALLOWED_TAGS: [
         'p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
         'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'a', 'img', 'table', 'thead', 'tbody', 'tr', 'td', 'th',
-        'hr', 'small', 'sub', 'sup', 'mark', 'del', 'ins', 'center', 'font'
+        'hr', 'small', 'sub', 'sup', 'mark', 'del', 'ins', 'center', 'font', 'button'
     ],
     ALLOWED_ATTR: [
         'href', 'src', 'alt', 'title', 'width', 'height', 'style', 'class', 'id', 'target',
-        'border', 'cellpadding', 'cellspacing', 'align', 'valign', 'bgcolor', 'color', 'face', 'size'
+        'border', 'cellpadding', 'cellspacing', 'align', 'valign', 'bgcolor', 'color', 'face', 'size',
+        'data-action', 'data-attachment-index', 'type', 'data-attachment'
     ],
     ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp|data):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
     
     // Security settings
-    FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input', 'button'],
+    FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input'],
     FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur'],
     FORBID_CONTENTS: ['script'],
     
@@ -75,21 +76,22 @@ export const DOMPURIFY_CONFIG: DOMPurifyConfig = {
         ALLOWED_TAGS: [
             'p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
             'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'a', 'img', 'table', 'thead', 'tbody', 'tr', 'td', 'th',
-            'hr', 'small', 'sub', 'sup', 'mark', 'del', 'ins', 'center', 'font', 'style'
+            'hr', 'small', 'sub', 'sup', 'mark', 'del', 'ins', 'center', 'font', 'style', 'button'
         ],
         ALLOWED_ATTR: [
             'href', 'src', 'alt', 'title', 'width', 'height', 'style', 'class', 'id', 'target',
-            'border', 'cellpadding', 'cellspacing', 'align', 'valign', 'bgcolor', 'color', 'face', 'size', 'loading'
+            'border', 'cellpadding', 'cellspacing', 'align', 'valign', 'bgcolor', 'color', 'face', 'size', 'loading',
+            'data-action', 'data-attachment-index', 'type', 'data-attachment'
         ],
-        FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input', 'button'],
+        FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input'],
         FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur']
     },
     
     // UI content configuration - more restrictive for app UI
     ui: {
-        ALLOWED_TAGS: ['span', 'div', 'p', 'br', 'strong', 'b', 'em', 'i', 'u', 'small', 'code'],
-        ALLOWED_ATTR: ['class', 'id', 'style'],
-        FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input', 'button', 'a', 'img'],
+        ALLOWED_TAGS: ['span', 'div', 'p', 'br', 'strong', 'b', 'em', 'i', 'u', 'small', 'code', 'button', 'i'],
+        ALLOWED_ATTR: ['class', 'id', 'style', 'data-action', 'data-attachment-index', 'title', 'type', 'data-attachment'],
+        FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input', 'a', 'img'],
         FORBID_ATTR: ['onclick', 'onerror', 'onload', 'onmouseover', 'onfocus', 'onblur', 'href', 'src']
     },
     

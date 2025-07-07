@@ -16,7 +16,7 @@ import { EmailManager } from '../email/email-manager.js';
 import { EmailRenderer } from '../email/email-renderer.js';
 import { EmailFilterManager } from '../email/email-filter-manager.js';
 import { MarketingEmailDetector } from '../email/marketing-email-detector.js';
-import { AttachmentHandler } from '../utils/attachment-handler.js';
+import { AttachmentHandler, getAttachmentManager } from '../utils/attachment-handler.js';
 
 console.log('=== IMPORTS COMPLETED ===');
 console.log('All modules imported successfully');
@@ -76,6 +76,15 @@ console.log('=== INITIALIZING GLOBAL DEPENDENCIES ===');
 (globalThis as any).DOMPURIFY_CONFIG = DOMPURIFY_CONFIG;
 (globalThis as any).EMAIL_PARSING_CONFIG = EMAIL_PARSING_CONFIG;
 
+// Initialize DOMPurify with our config
+if (typeof DOMPurify !== 'undefined') {
+    // Set the default config
+    DOMPurify.setConfig(DOMPURIFY_CONFIG);
+    console.log('DOMPurify configured with custom settings');
+} else {
+    console.warn('DOMPurify not found - HTML sanitization will be limited');
+}
+
 // Initialize SafeHTML and make it available globally
 try {
     SafeHTML.initialize();
@@ -104,8 +113,30 @@ try {
 try {
     const attachmentHandlerInitialized = AttachmentHandler.initialize();
     if (attachmentHandlerInitialized) {
-        (globalThis as any).AttachmentHandler = AttachmentHandler;
-        console.log('AttachmentHandler initialized and made globally available');
+        // Make AttachmentHandler and its instance methods available globally
+        (globalThis as any).AttachmentHandler = {
+            ...AttachmentHandler,
+            // Expose instance methods
+            previewAttachment: AttachmentHandler.previewAttachment.bind(AttachmentHandler),
+            downloadAttachment: AttachmentHandler.downloadAttachment.bind(AttachmentHandler),
+            createAttachmentList: AttachmentHandler.createAttachmentList.bind(AttachmentHandler),
+            addAttachmentEventListeners: AttachmentHandler.addAttachmentEventListeners.bind(AttachmentHandler),
+            debugLog: AttachmentHandler.debugLog.bind(AttachmentHandler)
+        };
+        
+        // Initialize AttachmentManager singleton
+        (globalThis as any).AttachmentManager = {
+            getInstance: () => {
+                const manager = getAttachmentManager();
+                return {
+                    downloadAttachmentWithLoading: manager.downloadAttachmentWithLoading.bind(manager),
+                    previewAttachmentWithLoading: manager.previewAttachmentWithLoading.bind(manager),
+                    fetchGmailAttachmentContent: manager.fetchGmailAttachmentContent.bind(manager)
+                };
+            }
+        };
+        
+        console.log('AttachmentHandler and AttachmentManager initialized and made globally available');
     } else {
         throw new Error('AttachmentHandler initialization failed');
     }
