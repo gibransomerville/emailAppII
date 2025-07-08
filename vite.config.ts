@@ -22,7 +22,7 @@ export default defineConfig({
     target: 'esnext',
     sourcemap: true,
   },
-  publicDir: false, // Don't copy static assets automatically
+  publicDir: 'public', // Copy static assets including PDF.js worker
   server: {
     port: 5173,
     open: false,
@@ -43,7 +43,8 @@ export default defineConfig({
       './dist/email/imap-email-manager.js',
       './dist/email/email-composer.js',
       './dist/ui/ui-theme-manager.js',
-      './dist/ui/ui-components.js'
+      './dist/ui/ui-components.js',
+      'pdfjs-dist'
     ]
   }
 }); 

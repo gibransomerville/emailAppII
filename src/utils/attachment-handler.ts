@@ -74,9 +74,27 @@ class AttachmentManagerSingleton {
                 throw new Error(result.error || 'Failed to fetch attachment content');
             }
             
-            // Cache the content
-            this.cache.set(cacheKey, result.data);
-            return result.data;
+            // Convert base64url to base64 format
+            // Gmail API returns base64url, but attachment processor expects regular base64
+            let base64Content = result.data;
+            if (base64Content && typeof base64Content === 'string') {
+                // Convert base64url to base64: replace - with +, _ with /
+                base64Content = base64Content.replace(/-/g, '+').replace(/_/g, '/');
+                
+                // Add padding if necessary
+                const padding = '='.repeat((4 - base64Content.length % 4) % 4);
+                base64Content = base64Content + padding;
+                
+                console.log(`[Gmail Attachment] Converted base64url to base64 for ${attachment.filename}`, {
+                    originalLength: result.data.length,
+                    convertedLength: base64Content.length,
+                    addedPadding: padding.length
+                });
+            }
+            
+            // Cache the converted content
+            this.cache.set(cacheKey, base64Content);
+            return base64Content;
             
         } catch (error) {
             console.error('Error fetching Gmail attachment content:', error);
@@ -278,7 +296,7 @@ class AttachmentHandler {
     }
 
     /**
-     * Create data URL for attachment
+     * Create data URL for attachment using safe data processor
      */
     static async createDataURL(attachment: Attachment): Promise<string> {
         try {
@@ -303,7 +321,25 @@ class AttachmentHandler {
                         throw new Error(result.error || 'Failed to fetch attachment content');
                     }
                     
-                    attachment.content = result.data;
+                    // Convert base64url to base64 format
+                    // Gmail API returns base64url, but attachment processor expects regular base64
+                    let base64Content = result.data;
+                    if (base64Content && typeof base64Content === 'string') {
+                        // Convert base64url to base64: replace - with +, _ with /
+                        base64Content = base64Content.replace(/-/g, '+').replace(/_/g, '/');
+                        
+                        // Add padding if necessary
+                        const padding = '='.repeat((4 - base64Content.length % 4) % 4);
+                        base64Content = base64Content + padding;
+                        
+                        console.log(`[Gmail Attachment] Converted base64url to base64 for ${attachment.filename}`, {
+                            originalLength: result.data.length,
+                            convertedLength: base64Content.length,
+                            addedPadding: padding.length
+                        });
+                    }
+                    
+                    attachment.content = base64Content;
                 } catch (authError) {
                     // If Google authentication is not available, check if we can handle this attachment another way
                     console.warn('Failed to fetch Gmail attachment content:', authError);
@@ -337,28 +373,21 @@ class AttachmentHandler {
                 throw new Error('No attachment content available. The attachment may require authentication to download.');
             }
 
-            let content = attachment.content;
+            // Use safe data processor to create data URL
+            const { default: AttachmentDataProcessor } = await import('./attachment-data-processor.js');
             
-            // If content is already a data URL, return it
-            if (typeof content === 'string' && content.startsWith('data:')) {
-                return content;
+            // Debug attachment data format
+            AttachmentDataProcessor.debugAttachmentData(attachment);
+            
+            // Validate attachment before processing
+            const validation = AttachmentDataProcessor.validateAttachment(attachment);
+            if (!validation.isValid) {
+                console.warn('Attachment validation failed:', validation.errors);
+                // Continue anyway, but log the issues
             }
-
-            // If content is base64 encoded, create data URL
-            if (typeof content === 'string') {
-                const mimeType = attachment.contentType || 'application/octet-stream';
-                return `data:${mimeType};base64,${content}`;
-            }
-
-            // If content is a Buffer or Uint8Array, convert to base64
-            if (content instanceof Uint8Array || (content as any)?.constructor?.name === 'ArrayBuffer') {
-                const bytes = new Uint8Array(content as ArrayBuffer | Uint8Array);
-                const base64 = btoa(String.fromCharCode.apply(null, Array.from(bytes)));
-                const mimeType = attachment.contentType || 'application/octet-stream';
-                return `data:${mimeType};base64,${base64}`;
-            }
-
-            throw new Error('Unsupported attachment content format');
+            
+            return await AttachmentDataProcessor.createSafeDataURL(attachment);
+            
         } catch (error) {
             console.error('Error creating data URL for attachment:', error);
             throw error;
@@ -452,17 +481,204 @@ class AttachmentHandler {
             
             switch (fileType) {
                 case 'pdf':
-                    this.debugLog('PDF Preview', 'Creating PDF preview');
-                    const pdfUrl = await this.createDataURL(attachment);
-                    const pdfViewer = document.createElement('iframe');
-                    pdfViewer.src = pdfUrl;
-                    pdfViewer.style.cssText = `
-                        width: 100%;
-                        height: calc(90vh - 120px);
-                        border: none;
-                        background: white;
-                    `;
-                    container.appendChild(pdfViewer);
+                    this.debugLog('PDF Preview', 'Creating PDF preview with PDF.js renderer');
+                    
+                    try {
+                        // Try advanced PDF renderer first
+                        let pdfRendered = false;
+                        
+                        try {
+                            // Import PDF renderer dynamically
+                            const { default: PDFRenderer } = await import('../ui/pdf-renderer.js');
+                            
+                            // Create PDF renderer container
+                            const pdfContainer = document.createElement('div');
+                            pdfContainer.style.cssText = `
+                                width: 100%;
+                                height: calc(90vh - 120px);
+                                border: none;
+                                background: white;
+                                border-radius: 4px;
+                                overflow: hidden;
+                            `;
+                            
+                            // Initialize PDF renderer with error handling
+                            const pdfRenderer = PDFRenderer.getInstance({
+                                defaultScale: 1.2,
+                                enableSearch: true,
+                                enableNavigation: true,
+                                enableZoom: true,
+                                renderTimeout: 15000 // 15 second timeout
+                            });
+                            
+                            // Create PDF viewer
+                            await pdfRenderer.createPDFViewer(attachment, pdfContainer);
+                            
+                            container.appendChild(pdfContainer);
+                            pdfRendered = true;
+                            
+                        } catch (advancedError) {
+                            this.debugLog('PDF Preview', 'Advanced PDF renderer failed, trying simple loader', { error: advancedError });
+                            
+                            // Try simple PDF loader as fallback
+                            const { default: PDFJSLoader } = await import('../ui/pdf-loader.js');
+                            const pdfLoader = PDFJSLoader.getInstance();
+                            
+                            // Create simple PDF container
+                            const simplePdfContainer = document.createElement('div');
+                            simplePdfContainer.style.cssText = `
+                                width: 100%;
+                                height: calc(90vh - 120px);
+                                border: none;
+                                background: white;
+                                border-radius: 4px;
+                                overflow: hidden;
+                                display: flex;
+                                flex-direction: column;
+                            `;
+                            
+                            // Add header
+                            const header = document.createElement('div');
+                            header.style.cssText = `
+                                background: #f8f9fa;
+                                padding: 8px 16px;
+                                border-bottom: 1px solid #dee2e6;
+                                font-size: 14px;
+                                color: #495057;
+                            `;
+                            header.innerHTML = `
+                                <i class="fas fa-file-pdf" style="color: #dc3545; margin-right: 8px;"></i>
+                                ${attachment.filename || 'PDF Document'}
+                            `;
+                            
+                            // Create canvas for PDF
+                            const canvas = document.createElement('canvas');
+                            canvas.style.cssText = `
+                                flex: 1;
+                                max-width: 100%;
+                                max-height: 100%;
+                                object-fit: contain;
+                                margin: auto;
+                                display: block;
+                            `;
+                            
+                            simplePdfContainer.appendChild(header);
+                            simplePdfContainer.appendChild(canvas);
+                            
+                            // Get PDF data safely using data processor
+                            const { default: AttachmentDataProcessor } = await import('./attachment-data-processor.js');
+                            const arrayBuffer = await AttachmentDataProcessor.getArrayBuffer(attachment);
+                            const uint8Array = new Uint8Array(arrayBuffer);
+                            
+                            // Load and render PDF
+                            const pdfDocument = await pdfLoader.createPDFDocument(uint8Array);
+                            await pdfLoader.renderPDFToCanvas(pdfDocument, 1, canvas, 1.2);
+                            
+                            container.appendChild(simplePdfContainer);
+                            pdfRendered = true;
+                            
+                            this.debugLog('PDF Preview', 'Simple PDF loader succeeded');
+                        }
+                        
+                        if (pdfRendered) {
+                            break; // Successfully rendered PDF, exit switch
+                        }
+                        
+                        throw new Error('All PDF rendering methods failed');
+                        
+                    } catch (pdfError) {
+                        this.debugLog('PDF Preview', 'PDF.js renderer failed, falling back to iframe', { 
+                            error: pdfError,
+                            errorMessage: (pdfError as Error).message,
+                            errorStack: (pdfError as Error).stack,
+                            attachmentInfo: {
+                                filename: attachment.filename,
+                                contentType: attachment.contentType,
+                                size: attachment.size,
+                                hasContent: !!attachment.content,
+                                hasAttachmentId: !!attachment.attachmentId
+                            }
+                        });
+                        
+                        // Show detailed error in console for debugging
+                        console.error('PDF.js detailed error:', pdfError);
+                        
+                        // Fallback to iframe if PDF.js fails
+                        const fallbackContainer = document.createElement('div');
+                        fallbackContainer.style.cssText = `
+                            width: 100%;
+                            height: calc(90vh - 120px);
+                            display: flex;
+                            flex-direction: column;
+                            background: white;
+                            border-radius: 4px;
+                            overflow: hidden;
+                        `;
+                        
+                        // Show fallback message
+                        const fallbackMessage = document.createElement('div');
+                        fallbackMessage.style.cssText = `
+                            background: #fff3cd;
+                            color: #856404;
+                            padding: 8px 16px;
+                            border-bottom: 1px solid #ffeaa7;
+                            font-size: 12px;
+                            display: flex;
+                            align-items: center;
+                            gap: 8px;
+                        `;
+                        fallbackMessage.innerHTML = `
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <span>Using browser's default PDF viewer (PDF.js advanced features unavailable)</span>
+                        `;
+                        
+                        // Create fallback iframe
+                        try {
+                            const pdfUrl = await this.createDataURL(attachment);
+                            const fallbackIframe = document.createElement('iframe');
+                            fallbackIframe.src = pdfUrl;
+                            fallbackIframe.style.cssText = `
+                                width: 100%;
+                                height: 100%;
+                                border: none;
+                                background: white;
+                            `;
+                            
+                            fallbackContainer.appendChild(fallbackMessage);
+                            fallbackContainer.appendChild(fallbackIframe);
+                            
+                        } catch (fallbackError) {
+                            this.debugLog('PDF Preview', 'Fallback iframe also failed', { error: fallbackError });
+                            
+                            // Show error message
+                            const errorMessage = document.createElement('div');
+                            errorMessage.style.cssText = `
+                                padding: 40px;
+                                text-align: center;
+                                color: #d32f2f;
+                                background: #ffebee;
+                                height: 100%;
+                                display: flex;
+                                flex-direction: column;
+                                align-items: center;
+                                justify-content: center;
+                            `;
+                            errorMessage.innerHTML = `
+                                <i class="fas fa-exclamation-circle" style="font-size: 48px; margin-bottom: 16px;"></i>
+                                <h3 style="margin: 0 0 8px 0;">PDF Preview Error</h3>
+                                <p style="margin: 0; color: #666;">
+                                    Unable to preview this PDF file. You can still download it using the download button.
+                                </p>
+                                <p style="margin: 16px 0 0 0; font-size: 12px; color: #999;">
+                                    Error: ${(pdfError as Error).message}
+                                </p>
+                            `;
+                            
+                            fallbackContainer.appendChild(errorMessage);
+                        }
+                        
+                        container.appendChild(fallbackContainer);
+                    }
                     break;
 
                 case 'image':
@@ -841,14 +1057,24 @@ class AttachmentHandler {
             const modal = await this.createPreviewModal(attachment);
             document.body.appendChild(modal);
             
-            // Show modal with animation
-            requestAnimationFrame(() => {
+            // Force layout calculation before showing modal
+            modal.offsetHeight; // Force reflow
+            
+            // Show modal with animation - use setTimeout to ensure proper timing
+            setTimeout(() => {
                 modal.style.opacity = '1';
                 const modalContent = modal.querySelector('.modal-content') as HTMLElement;
                 if (modalContent) {
                     modalContent.style.transform = 'translateY(0)';
                 }
-            });
+                
+                this.debugLog('Modal Display', 'Modal animation started', {
+                    modalOpacity: modal.style.opacity,
+                    contentTransform: modalContent?.style.transform,
+                    modalRect: modal.getBoundingClientRect(),
+                    contentRect: modalContent?.getBoundingClientRect()
+                });
+            }, 10); // Small delay to ensure DOM is ready
 
         } catch (error) {
             const endTime = performance.now();
@@ -1107,16 +1333,28 @@ class AttachmentHandler {
             // Create preview content
             const previewContent = await this.createAttachmentPreview(attachment);
             const previewContainer = document.createElement('div');
+            previewContainer.className = 'preview-container';
+            
+            // Ensure proper sizing for PDF content
+            const isPDF = this.getFileTypeCategory(attachment.contentType) === 'pdf';
             previewContainer.style.cssText = `
                 flex: 1;
                 overflow: auto;
-                padding: 20px;
+                padding: ${isPDF ? '0' : '20px'};
                 display: flex;
                 justify-content: center;
                 align-items: flex-start;
                 background: ${this.getFileTypeCategory(attachment.contentType) === 'image' ? '#f0f0f0' : 'white'};
+                min-height: ${isPDF ? 'calc(90vh - 120px)' : 'auto'};
             `;
             previewContainer.appendChild(previewContent);
+            
+            // Debug container dimensions
+            this.debugLog('Preview Container', 'Container created', {
+                isPDF,
+                containerStyle: previewContainer.style.cssText,
+                contentType: attachment.contentType
+            });
 
             // Assemble modal
             actions.appendChild(downloadBtn);
@@ -1157,14 +1395,17 @@ class AttachmentHandler {
             // Focus management
             setTimeout(() => closeBtn.focus(), 100);
 
-            this.debugLog('Modal Creation', 'Preview modal created successfully', {
-                type: attachment.contentType,
-                size: this.formatFileSize(attachment.size),
-                modalDimensions: {
-                    width: modalContent.offsetWidth,
-                    height: modalContent.offsetHeight
-                }
-            });
+            // Set up a callback to measure dimensions after modal is displayed
+            setTimeout(() => {
+                this.debugLog('Modal Creation', 'Preview modal created successfully', {
+                    type: attachment.contentType,
+                    size: this.formatFileSize(attachment.size),
+                    modalDimensions: {
+                        width: modalContent.offsetWidth,
+                        height: modalContent.offsetHeight
+                    }
+                });
+            }, 50); // Measure after animation completes
 
             return modal;
 

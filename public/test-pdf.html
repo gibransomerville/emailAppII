@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF.js Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        
+        .test-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .test-result {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        
+        #pdf-container {
+            width: 100%;
+            height: 600px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: white;
+            margin-top: 20px;
+        }
+        
+        .log-container {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        
+        button:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <h1>PDF.js Integration Test</h1>
+    
+    <div class="test-container">
+        <h2>Environment Tests</h2>
+        <div id="environment-tests"></div>
+        
+        <h2>PDF.js Library Tests</h2>
+        <div id="pdfjs-tests"></div>
+        
+        <h2>Worker Tests</h2>
+        <div id="worker-tests"></div>
+        
+        <button onclick="runAllTests()">Run All Tests</button>
+        <button onclick="testPDFRendering()">Test PDF Rendering</button>
+        <button onclick="clearLogs()">Clear Logs</button>
+    </div>
+    
+    <div class="test-container">
+        <h2>PDF Test Container</h2>
+        <div id="pdf-container"></div>
+    </div>
+    
+    <div class="test-container">
+        <h2>Debug Logs</h2>
+        <div id="logs" class="log-container"></div>
+    </div>
+
+    <script type="module">
+        const logs = document.getElementById('logs');
+        const environmentTests = document.getElementById('environment-tests');
+        const pdfjsTests = document.getElementById('pdfjs-tests');
+        const workerTests = document.getElementById('worker-tests');
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.textContent = `[${timestamp}] ${message}`;
+            logEntry.className = type;
+            logs.appendChild(logEntry);
+            logs.scrollTop = logs.scrollHeight;
+            console.log(message);
+        }
+        
+        function showResult(container, test, status, message) {
+            const result = document.createElement('div');
+            result.className = `test-result ${status}`;
+            result.innerHTML = `<strong>${test}:</strong> ${message}`;
+            container.appendChild(result);
+        }
+        
+        window.clearLogs = function() {
+            logs.innerHTML = '';
+        };
+        
+        window.runAllTests = async function() {
+            log('Starting PDF.js integration tests...');
+            
+            // Environment tests
+            environmentTests.innerHTML = '';
+            
+            // Test 1: Check if we're in renderer process
+            try {
+                const hasWindow = typeof window !== 'undefined';
+                const hasDocument = typeof document !== 'undefined';
+                const hasElectron = typeof window.require !== 'undefined';
+                
+                showResult(environmentTests, 'Environment Check', 
+                    hasWindow && hasDocument ? 'success' : 'error',
+                    `Window: ${hasWindow}, Document: ${hasDocument}, Electron: ${hasElectron}`
+                );
+                
+                log(`Environment - Window: ${hasWindow}, Document: ${hasDocument}, Electron: ${hasElectron}`);
+            } catch (e) {
+                showResult(environmentTests, 'Environment Check', 'error', e.message);
+                log(`Environment test error: ${e.message}`, 'error');
+            }
+            
+            // Test 2: Check PDF.js import
+            pdfjsTests.innerHTML = '';
+            
+            try {
+                log('Testing PDF.js import...');
+                const pdfjsLib = await import('pdfjs-dist');
+                
+                showResult(pdfjsTests, 'PDF.js Import', 'success', 
+                    `Version: ${pdfjsLib.version}, getDocument: ${typeof pdfjsLib.getDocument}`
+                );
+                
+                log(`PDF.js imported successfully - Version: ${pdfjsLib.version}`);
+                
+                // Test 3: Worker setup
+                workerTests.innerHTML = '';
+                
+                const workerPaths = [
+                    './js/pdf.worker.min.mjs',
+                    '/js/pdf.worker.min.mjs',
+                    `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`
+                ];
+                
+                for (const workerPath of workerPaths) {
+                    try {
+                        log(`Testing worker path: ${workerPath}`);
+                        const response = await fetch(workerPath, { method: 'HEAD' });
+                        
+                        if (response.ok) {
+                            showResult(workerTests, `Worker Path ${workerPath}`, 'success', 
+                                `Status: ${response.status}, Content-Type: ${response.headers.get('content-type')}`
+                            );
+                            
+                            log(`Worker path ${workerPath} - Available (${response.status})`);
+                            
+                            // Try to set this worker
+                            pdfjsLib.GlobalWorkerOptions.workerSrc = workerPath;
+                            
+                            showResult(workerTests, 'Worker Setup', 'success', 
+                                `Worker configured: ${workerPath}`
+                            );
+                            
+                            log(`Worker configured successfully: ${workerPath}`);
+                            break;
+                        } else {
+                            showResult(workerTests, `Worker Path ${workerPath}`, 'error', 
+                                `Status: ${response.status}`
+                            );
+                            log(`Worker path ${workerPath} - Not available (${response.status})`, 'warning');
+                        }
+                    } catch (e) {
+                        showResult(workerTests, `Worker Path ${workerPath}`, 'error', e.message);
+                        log(`Worker path ${workerPath} - Error: ${e.message}`, 'warning');
+                    }
+                }
+                
+            } catch (e) {
+                showResult(pdfjsTests, 'PDF.js Import', 'error', e.message);
+                log(`PDF.js import error: ${e.message}`, 'error');
+            }
+            
+            log('Tests completed');
+        };
+        
+        window.testPDFRendering = async function() {
+            log('Starting PDF rendering test...');
+            
+            try {
+                const pdfjsLib = await import('pdfjs-dist');
+                
+                // Set worker
+                pdfjsLib.GlobalWorkerOptions.workerSrc = './js/pdf.worker.min.mjs';
+                
+                // Create a simple PDF for testing
+                const pdfData = await createTestPDF();
+                
+                log('Loading PDF document...');
+                const loadingTask = pdfjsLib.getDocument(pdfData);
+                const pdf = await loadingTask.promise;
+                
+                log(`PDF loaded successfully - Pages: ${pdf.numPages}`);
+                
+                // Get first page
+                const page = await pdf.getPage(1);
+                const viewport = page.getViewport({ scale: 1.0 });
+                
+                log(`Page loaded - Dimensions: ${viewport.width}x${viewport.height}`);
+                
+                // Create canvas
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                
+                // Render page
+                const renderContext = {
+                    canvasContext: context,
+                    viewport: viewport
+                };
+                
+                await page.render(renderContext).promise;
+                
+                log('PDF page rendered successfully');
+                
+                // Show result
+                const container = document.getElementById('pdf-container');
+                container.innerHTML = '';
+                container.appendChild(canvas);
+                
+                showResult(pdfjsTests, 'PDF Rendering Test', 'success', 
+                    `Successfully rendered PDF page (${viewport.width}x${viewport.height})`
+                );
+                
+            } catch (e) {
+                log(`PDF rendering error: ${e.message}`, 'error');
+                showResult(pdfjsTests, 'PDF Rendering Test', 'error', e.message);
+            }
+        };
+        
+        // Create a simple test PDF
+        async function createTestPDF() {
+            // This is a minimal PDF content for testing
+            const pdfContent = `%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>
+endobj
+
+4 0 obj
+<< /Length 44 >>
+stream
+BT
+/F1 12 Tf
+100 700 Td
+(Hello PDF.js Test!) Tj
+ET
+endstream
+endobj
+
+xref
+0 5
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000207 00000 n 
+trailer
+<< /Size 5 /Root 1 0 R >>
+startxref
+295
+%%EOF`;
+            
+            // Convert to Uint8Array
+            const encoder = new TextEncoder();
+            return encoder.encode(pdfContent);
+        }
+        
+        // Auto-run tests on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            runAllTests();
+        });
+    </script>
+</body>
+</html> 
