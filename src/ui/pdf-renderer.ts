@@ -732,7 +732,7 @@ class PDFRenderer {
             
             if (scrollTop >= pageTop - 100 && scrollTop < pageBottom - 100) {
                 currentPage = index + 1;
-            }
+        }
         });
 
         if (currentPage !== this.state.currentPage) {
@@ -759,7 +759,7 @@ class PDFRenderer {
         if (contentArea) {
             contentArea.scrollTo({ top: contentArea.scrollHeight, behavior: 'smooth' });
         }
-    }
+        }
 
     /**
      * Auto-resize modal based on PDF dimensions and orientation (content-based)
@@ -875,7 +875,7 @@ class PDFRenderer {
                 margin: 0;
                 padding: 0;
                 flex-shrink: 0;
-            `;
+        `;
 
             // Create minimal canvas
         const canvas = document.createElement('canvas');

@@ -1251,22 +1251,21 @@ class AttachmentHandler {
             }
         }
         
-        // Apply width but maintain 80vh height constraint
+        // Apply width but let height be determined by content
         modalContent.style.width = `${Math.round(targetWidth)}px`;
-        modalContent.style.height = '80vh'; // Always use 80vh height
+        modalContent.style.height = 'fit-content'; // Let content determine height
         modalContent.style.minWidth = '320px'; // Ensure minimum width
-        modalContent.style.minHeight = '400px'; // Ensure minimum height
-        modalContent.style.maxHeight = 'calc(80vh - 40px)'; // Prevent overflow
+        modalContent.style.minHeight = '200px'; // Ensure minimum height
+        modalContent.style.maxHeight = `${Math.round(targetHeight)}px`; // Prevent overflow
         
-        AttachmentHandler.debugLog('Modal Resize', 'Resized modal for PDF (80vh height constraint)', {
+        AttachmentHandler.debugLog('Modal Resize', 'Resized modal for PDF (80% window height)', {
             pdfDimensions: { width: pdfWidth, height: pdfHeight },
             orientation,
             aspectRatio: pdfAspectRatio,
-            modalDimensions: { width: targetWidth, height: '80vh' },
+            modalDimensions: { width: targetWidth, height: targetHeight },
             screenConstraints: { maxWidth, maxHeight },
             windowHeight: screenHeight,
-            eightyPercentHeight: screenHeight * 0.8,
-            modalHeight: '80vh'
+            eightyPercentHeight: screenHeight * 0.8
         });
     }
 
@@ -1320,7 +1319,7 @@ class AttachmentHandler {
                 max-width: calc(100vw - 40px);
                 max-height: calc(80vh - 40px);
                 width: ${isPDF ? 'fit-content' : 'auto'};
-                height: 80vh;
+                height: ${isPDF ? 'fit-content' : '80vh'};
                 overflow: hidden;
                 position: relative;
                 box-shadow: 0 2px 16px rgba(0, 0, 0, 0.15);
