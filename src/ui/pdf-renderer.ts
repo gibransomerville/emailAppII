@@ -59,6 +59,7 @@ interface PDFRendererConfig {
     maxScale: number;
     minScale: number;
     scaleStep: number;
+    dpiMultiplier: number; // Higher values = sharper rendering (1.0 = 72 DPI, 2.0 = 144 DPI, 3.0 = 216 DPI)
     enableSearch: boolean;
     enableNavigation: boolean;
     enableZoom: boolean;
@@ -151,17 +152,18 @@ class PDFRenderer {
 
     constructor(config: Partial<PDFRendererConfig> = {}) {
         this.config = {
-            defaultScale: 1.5,
+            defaultScale: 1.0, // ← Use actual size, let CSS handle fitting
             maxScale: 4.0,
             minScale: 0.3,
             scaleStep: 0.25,
+            dpiMultiplier: 2.0, // ← 2x DPI = 144 DPI for sharper rendering
             enableSearch: true,
             enableNavigation: true,
             enableZoom: true,
             enableFullscreen: true,
             enableTouch: true,
             renderTimeout: 10000,
-            maxCanvasSize: 67108864, // 64MB canvas limit for modern devices
+            maxCanvasSize: 67108864,
             searchCaseSensitive: false,
             mobileBreakpoint: 768,
             ...config
@@ -185,7 +187,6 @@ class PDFRenderer {
             lastTouchY: 0
         };
 
-        // Set up responsive detection
         this.setupResponsiveDetection();
     }
 
@@ -200,13 +201,24 @@ class PDFRenderer {
     }
 
     /**
-     * Set up responsive detection
+     * Enhanced responsive detection with ResizeObserver
      */
     private setupResponsiveDetection(): void {
         window.addEventListener('resize', () => {
             this.state.isMobile = window.innerWidth <= this.config.mobileBreakpoint;
             this.updateResponsiveLayout();
         });
+
+        // Set up ResizeObserver for container size changes
+        if ('ResizeObserver' in window) {
+            this.resizeObserver = new ResizeObserver((entries) => {
+                for (const entry of entries) {
+                    if (entry.target.classList.contains('pdf-viewer-content')) {
+                        this.handleContainerResize();
+                    }
+                }
+            });
+        }
     }
 
     /**
@@ -228,7 +240,6 @@ class PDFRenderer {
             }
         }
 
-        // Update control visibility for mobile
         this.updateMobileControls();
     }
 
@@ -247,6 +258,131 @@ class PDFRenderer {
                 element.classList.remove('mobile-controls');
             }
         });
+    }
+
+    /**
+     * Handle container resize events
+     */
+    private async handleContainerResize(): Promise<void> {
+        if (!this.container) return;
+        
+        const pagesContainer = this.container.querySelector('.pdf-pages-container') as HTMLElement;
+        
+        if (pagesContainer) {
+            await this.applyCSSBasedFitting(pagesContainer);
+        }
+    }
+
+    /**
+     * Apply CSS-based fitting using actual PDF page dimensions
+     */
+    private async applyCSSBasedFitting(container: HTMLElement): Promise<void> {
+        const contentArea = this.container?.querySelector('.pdf-viewer-content') as HTMLElement;
+        if (!contentArea || !this.currentDocument) return;
+
+        const PADDING = 16; // Minimal padding
+        const PAGE_GAP = 8; // Minimal gap between pages
+        
+        // Get available space
+        const availableWidth = contentArea.clientWidth - PADDING;
+        
+        try {
+            // Get ACTUAL PDF page dimensions from first page
+            const page = await this.currentDocument.getPage(1);
+            const viewport = page.getViewport({ scale: 1.0 });
+            const actualPDFAspectRatio = viewport.width / viewport.height;
+            
+            // Calculate optimal page width based on available space (responsive to modal size)
+            const containerWidth = Math.min(availableWidth, availableWidth * 0.9); // Use most of available space
+            const containerHeight = containerWidth / actualPDFAspectRatio;
+            
+            // Set container dimensions for continuous scroll (minimal spacing)
+            container.style.width = `${containerWidth}px`;
+            container.style.maxWidth = `${containerWidth}px`;
+            container.style.margin = '0';
+            container.style.display = 'flex';
+            container.style.flexDirection = 'column';
+            container.style.gap = `${PAGE_GAP}px`;
+            container.style.padding = '0';
+            
+            // Update all page containers and canvases
+            const pageContainers = container.querySelectorAll('.pdf-page-container');
+            pageContainers.forEach((pageContainer, index) => {
+                const containerElement = pageContainer as HTMLElement;
+                const canvas = containerElement.querySelector('.pdf-page-canvas') as HTMLCanvasElement;
+                
+                if (canvas) {
+                    // Get canvas dimensions and DPI info
+                    const dpiMultiplier = (canvas as any).__dpiMultiplier || 1.0;
+                    const naturalWidth = (canvas as any).__naturalWidth || canvas.width;
+                    const naturalHeight = (canvas as any).__naturalHeight || canvas.height;
+                    
+                    // Calculate base scale using natural (display) dimensions, not high-res canvas dimensions
+                    const baseScaleX = containerWidth / naturalWidth;
+                    const baseScaleY = containerHeight / naturalHeight;
+                    const baseScale = Math.min(baseScaleX, baseScaleY, 1.0);
+                    
+                    // Calculate final scale: compensate for DPI multiplier and apply user zoom
+                    const dpiCompensation = 1.0 / dpiMultiplier;
+                    const finalScale = baseScale * this.state.scale * dpiCompensation;
+                    
+                    // Set container to fixed size with minimal styling
+                    containerElement.style.width = `${containerWidth}px`;
+                    containerElement.style.height = `${containerHeight}px`;
+                    containerElement.style.display = 'flex';
+                    containerElement.style.justifyContent = 'center';
+                    containerElement.style.alignItems = 'center';
+                    containerElement.style.background = 'white';
+                    containerElement.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+                    containerElement.style.borderRadius = '4px';
+                    containerElement.style.overflow = 'hidden'; // Prevent scrolling artifacts
+                    containerElement.style.position = 'relative';
+                    containerElement.style.margin = '0';
+                    containerElement.style.padding = '0';
+                    containerElement.style.flexShrink = '0'; // Prevent flex shrinking
+                    
+                    // Apply zoom with DPI compensation to the canvas content
+                    canvas.style.transform = `scale(${finalScale})`;
+                    canvas.style.transformOrigin = 'center center';
+                    canvas.style.display = 'block';
+                    canvas.style.borderRadius = '2px';
+                    canvas.style.background = 'white';
+                    canvas.style.margin = '0';
+                    canvas.style.padding = '0';
+                    
+                    // Store base scale for zoom calculations
+                    (containerElement as any).__baseScale = baseScale;
+                    (containerElement as any).__dpiCompensation = dpiCompensation;
+                }
+            });
+            
+            // Center the container within the content area (minimal styling)
+            contentArea.style.display = 'flex';
+            contentArea.style.justifyContent = 'center';
+            contentArea.style.alignItems = 'flex-start';
+            contentArea.style.padding = '0';
+            contentArea.style.margin = '0';
+            contentArea.style.overflowY = 'auto'; // Enable vertical scrolling
+            contentArea.style.overflowX = 'hidden';
+            contentArea.style.minHeight = '0'; // Prevent flex expansion
+            
+            this.debugLog('CSS fitting applied using actual PDF dimensions', {
+                availableWidth,
+                containerWidth,
+                containerHeight,
+                pageCount: pageContainers.length,
+                actualPDFAspectRatio,
+                pageGap: PAGE_GAP,
+                userScale: this.state.scale,
+                pdfDimensions: { width: viewport.width, height: viewport.height },
+                containerPadding: container.style.padding,
+                contentAreaPadding: contentArea.style.padding,
+                pagesContainerPadding: container.style.padding
+            });
+            
+        } catch (error) {
+            this.debugLog('Error in CSS fitting with PDF dimensions', { error: (error as Error).message });
+        }
     }
 
     /**
@@ -398,8 +534,8 @@ class PDFRenderer {
             // Create viewer UI
             this.createViewerUI(viewerContainer, attachment);
             
-            // Render first page directly (no canvas loading overlay for initial load)
-            await this.renderPage(1);
+            // Render all pages for continuous scroll
+            await this.renderAllPages();
 
             this.debugLog('PDF loaded successfully', {
                 totalPages: this.state.totalPages,
@@ -416,175 +552,382 @@ class PDFRenderer {
     }
 
     /**
-     * Create viewer container structure
+     * Create ultra-minimal viewer container (content-based sizing)
      */
     private createViewerContainer(): HTMLElement {
         const container = document.createElement('div');
         container.className = 'pdf-viewer-container';
         container.style.cssText = `
             width: 100%;
-            height: 100%;
+            height: fit-content;
             display: flex;
             flex-direction: column;
-            background: #f5f5f5;
+            background: #f8f8f8;
             position: relative;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
         `;
         return container;
     }
 
     /**
-     * Create viewer UI with controls
+     * Create viewer UI with continuous scroll support (completely minimal - no white bar artifacts)
      */
     private createViewerUI(container: HTMLElement, attachment: Attachment): void {
         // Clear any existing content in the container
         container.innerHTML = '';
         
-        // Header with controls
-        const header = document.createElement('div');
-        header.className = 'pdf-viewer-header';
-        header.style.cssText = `
-            background: #fff;
-            border-bottom: 1px solid #e0e0e0;
-            padding: 8px 16px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-shrink: 0;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        `;
-
-        // Title section
-        const titleSection = document.createElement('div');
-        titleSection.style.cssText = `
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex: 1;
-            min-width: 0;
-        `;
-
-        const titleIcon = document.createElement('i');
-        titleIcon.className = 'fas fa-file-pdf';
-        titleIcon.style.cssText = 'color: #d32f2f; font-size: 16px;';
-
-        const titleText = document.createElement('span');
-        titleText.textContent = attachment.filename || 'PDF Document';
-        titleText.style.cssText = `
-            font-weight: 500;
-            color: #333;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            font-size: 14px;
-        `;
-
-        titleSection.appendChild(titleIcon);
-        titleSection.appendChild(titleText);
-
-        // Controls section
-        const controlsSection = document.createElement('div');
-        controlsSection.className = 'pdf-viewer-controls';
-        controlsSection.style.cssText = `
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-shrink: 0;
-        `;
-
-        // Navigation controls
-        if (this.config.enableNavigation) {
-            const navControls = this.createNavigationControls();
-            controlsSection.appendChild(navControls);
-        }
-
-        // Zoom controls
-        if (this.config.enableZoom) {
-            const zoomControls = this.createZoomControls();
-            controlsSection.appendChild(zoomControls);
-        }
-
-        // Search controls
-        if (this.config.enableSearch) {
-            const searchControls = this.createSearchControls();
-            controlsSection.appendChild(searchControls);
-        }
-
-        // Additional controls
-        const additionalControls = this.createAdditionalControls();
-        if (additionalControls) {
-            controlsSection.appendChild(additionalControls);
-        }
-
-        header.appendChild(titleSection);
-        header.appendChild(controlsSection);
-
-        // Content area
+        // Ultra-minimal content area with content-based sizing
         const contentArea = document.createElement('div');
         contentArea.className = 'pdf-viewer-content';
         contentArea.style.cssText = `
-            flex: 1;
-            overflow: auto;
+            overflow-y: auto;
+            overflow-x: hidden;
             display: flex;
             justify-content: center;
             align-items: flex-start;
-            padding: 16px;
-            background: #f5f5f5;
+            padding: 0;
+            margin: 0;
+            background: #f8f8f8;
+            position: relative;
+            scroll-behavior: smooth;
+            width: 100%;
+            height: fit-content;
         `;
 
-        // Canvas container
-        const canvasContainer = document.createElement('div');
-        canvasContainer.className = 'pdf-canvas-container';
-        canvasContainer.style.cssText = `
+        // Ultra-minimal pages container
+        const pagesContainer = document.createElement('div');
+        pagesContainer.className = 'pdf-pages-container';
+        pagesContainer.style.cssText = `
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 0;
+            margin: 0;
+            background: #f8f8f8;
+            width: 100%;
+            box-sizing: border-box;
+        `;
+
+        contentArea.appendChild(pagesContainer);
+
+        // Set up ResizeObserver on content area
+        if (this.resizeObserver) {
+            this.resizeObserver.observe(contentArea);
+        }
+
+        // Assemble completely minimal viewer (content area only)
+        container.appendChild(contentArea);
+
+        // Add scroll event listener for page tracking
+        this.setupScrollTracking(contentArea);
+
+        // Add keyboard shortcuts directly to container
+        this.setupMinimalKeyboardShortcuts(container);
+    }
+
+    /**
+     * Set up minimal keyboard shortcuts for toolbar-free experience
+     */
+    private setupMinimalKeyboardShortcuts(container: HTMLElement): void {
+        container.setAttribute('tabindex', '0'); // Make container focusable
+        
+        container.addEventListener('keydown', (e: KeyboardEvent) => {
+            switch (e.key) {
+                case 'Home':
+                    e.preventDefault();
+                    this.scrollToTop();
+                    break;
+                case 'End':
+                    e.preventDefault();
+                    this.scrollToBottom();
+                    break;
+                case 'PageUp':
+                case 'ArrowUp':
+                    e.preventDefault();
+                    this.scrollByAmount(-200); // Scroll up by 200px
+                    break;
+                case 'PageDown':
+                case 'ArrowDown':
+                case ' ':
+                    e.preventDefault();
+                    this.scrollByAmount(200); // Scroll down by 200px
+                    break;
+                case '+':
+                case '=':
+                    if (e.ctrlKey || e.metaKey) {
+                        e.preventDefault();
+                        this.zoomIn();
+                    }
+                    break;
+                case '-':
+                    if (e.ctrlKey || e.metaKey) {
+                        e.preventDefault();
+                        this.zoomOut();
+                    }
+                    break;
+                case '0':
+                    if (e.ctrlKey || e.metaKey) {
+                        e.preventDefault();
+                        this.resetZoom();
+                    }
+                    break;
+                case 'Escape':
+                    // Close modal if available
+                    const modal = container.closest('.attachment-preview-modal') as HTMLElement;
+                    if (modal) {
+                        const closeBtn = modal.querySelector('[aria-label="Close preview"]') as HTMLElement;
+                        if (closeBtn) closeBtn.click();
+                    }
+                    break;
+            }
+        });
+
+        // Focus container when PDF loads
+        setTimeout(() => container.focus(), 100);
+    }
+
+    /**
+     * Scroll by specific amount with smooth animation
+     */
+    private scrollByAmount(pixels: number): void {
+        const contentArea = this.container?.querySelector('.pdf-viewer-content') as HTMLElement;
+        if (contentArea) {
+            contentArea.scrollBy({
+                top: pixels,
+                behavior: 'smooth'
+            });
+        }
+    }
+
+
+
+    /**
+     * Set up scroll tracking for continuous scroll mode
+     */
+    private setupScrollTracking(contentArea: HTMLElement): void {
+        contentArea.addEventListener('scroll', () => {
+            this.updateCurrentPageFromScroll(contentArea);
+        });
+    }
+
+    /**
+     * Update current page indicator based on scroll position
+     */
+    private updateCurrentPageFromScroll(contentArea: HTMLElement): void {
+        const pagesContainer = contentArea.querySelector('.pdf-pages-container') as HTMLElement;
+        if (!pagesContainer) return;
+
+        const pageContainers = pagesContainer.querySelectorAll('.pdf-page-container');
+        const scrollTop = contentArea.scrollTop;
+        const containerTop = pagesContainer.offsetTop;
+
+        // Find which page is most visible
+        let currentPage = 1;
+        pageContainers.forEach((pageContainer, index) => {
+            const element = pageContainer as HTMLElement;
+            const pageTop = element.offsetTop - containerTop;
+            const pageBottom = pageTop + element.offsetHeight;
+            
+            if (scrollTop >= pageTop - 100 && scrollTop < pageBottom - 100) {
+                currentPage = index + 1;
+            }
+        });
+
+        if (currentPage !== this.state.currentPage) {
+            this.state.currentPage = currentPage;
+            this.updateUI();
+        }
+    }
+
+    /**
+     * Scroll to top of document
+     */
+    private scrollToTop(): void {
+        const contentArea = this.container?.querySelector('.pdf-viewer-content') as HTMLElement;
+        if (contentArea) {
+            contentArea.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    }
+
+    /**
+     * Scroll to bottom of document
+     */
+    private scrollToBottom(): void {
+        const contentArea = this.container?.querySelector('.pdf-viewer-content') as HTMLElement;
+        if (contentArea) {
+            contentArea.scrollTo({ top: contentArea.scrollHeight, behavior: 'smooth' });
+        }
+    }
+
+    /**
+     * Auto-resize modal based on PDF dimensions and orientation (content-based)
+     */
+    private async autoResizeModalForPDF(): Promise<void> {
+        if (!this.currentDocument) return;
+        
+        try {
+            // Get first page to determine PDF dimensions
+            const firstPage = await this.currentDocument.getPage(1);
+            const viewport = firstPage.getViewport({ scale: 1.0 });
+            
+            const pdfWidth = viewport.width;
+            const pdfHeight = viewport.height;
+            const aspectRatio = pdfWidth / pdfHeight;
+            
+            // Determine orientation
+            const orientation: 'portrait' | 'landscape' = aspectRatio > 1.2 ? 'landscape' : 'portrait';
+            
+            // Call modal resize callback if available
+            const modalRef = (window as any).__currentPDFModal;
+            if (modalRef && modalRef.resizeModal) {
+                modalRef.resizeModal(pdfWidth, pdfHeight, orientation);
+                
+                this.debugLog('PDF Modal Auto-Resize: Modal resized for PDF dimensions (content-based)', {
+                    pdfDimensions: { width: pdfWidth, height: pdfHeight },
+                    aspectRatio,
+                    orientation,
+                    dpiMultiplier: this.config.dpiMultiplier
+                });
+                
+                // Clean up the global reference
+                setTimeout(() => {
+                    delete (window as any).__currentPDFModal;
+                }, 100);
+            }
+        } catch (error) {
+            this.debugLog('PDF Modal Auto-Resize Error: Failed to auto-resize modal', {
+                error: (error as Error).message
+            });
+        }
+    }
+
+    /**
+     * Render all pages for continuous scroll
+     */
+    private async renderAllPages(): Promise<void> {
+        if (!this.currentDocument) {
+            throw new Error('No PDF document loaded');
+        }
+
+        const pagesContainer = this.container?.querySelector('.pdf-pages-container') as HTMLElement;
+        if (!pagesContainer) {
+            throw new Error('Pages container not found');
+        }
+
+        // Clear existing content
+        pagesContainer.innerHTML = '';
+
+        // Show loading state
+        this.showLoadingState(pagesContainer);
+
+        try {
+            // Render all pages
+            for (let pageNum = 1; pageNum <= this.state.totalPages; pageNum++) {
+                await this.renderPageToContinuousScroll(pageNum, pagesContainer);
+            }
+
+            // Apply CSS-based fitting after all pages are rendered (using actual PDF dimensions)
+            await this.applyCSSBasedFitting(pagesContainer);
+
+            // Auto-resize modal based on PDF dimensions and orientation
+            await this.autoResizeModalForPDF();
+
+            // Clear loading state
+            this.clearLoadingState(pagesContainer);
+
+            this.debugLog('All pages rendered for continuous scroll', {
+                totalPages: this.state.totalPages,
+                scale: this.state.scale
+            });
+
+        } catch (error) {
+            this.clearLoadingState(pagesContainer);
+            throw error;
+        }
+    }
+
+    /**
+     * Render a single page to the continuous scroll container
+     */
+    private async renderPageToContinuousScroll(pageNumber: number, container: HTMLElement): Promise<void> {
+        try {
+            const page = await this.currentDocument!.getPage(pageNumber);
+            
+            // Apply DPI multiplier for higher resolution rendering
+            let renderScale = this.state.scale * this.config.dpiMultiplier;
+            let viewport = page.getViewport({ scale: renderScale });
+
+            // Create minimal page container
+            const pageContainer = document.createElement('div');
+            pageContainer.className = 'pdf-page-container';
+            pageContainer.setAttribute('data-page', pageNumber.toString());
+            pageContainer.style.cssText = `
             background: white;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
             border-radius: 4px;
             overflow: hidden;
-            max-width: 100%;
-            max-height: 100%;
-        `;
+                position: relative;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                margin: 0;
+                padding: 0;
+                flex-shrink: 0;
+            `;
 
-        // Canvas
+            // Create minimal canvas
         const canvas = document.createElement('canvas');
-        canvas.className = 'pdf-canvas';
+            canvas.className = 'pdf-page-canvas';
         canvas.style.cssText = `
             display: block;
-            max-width: 100%;
+                width: auto;
             height: auto;
-        `;
+                border-radius: 2px;
+                margin: 0;
+                padding: 0;
+            `;
 
-        canvasContainer.appendChild(canvas);
-        contentArea.appendChild(canvasContainer);
+            // Set canvas dimensions to high-resolution size
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
 
-        // Status bar
-        const statusBar = document.createElement('div');
-        statusBar.className = 'pdf-viewer-status';
-        statusBar.style.cssText = `
-            background: #fff;
-            border-top: 1px solid #e0e0e0;
-            padding: 8px 16px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            font-size: 12px;
-            color: #666;
-            flex-shrink: 0;
-        `;
+            // Store DPI info for CSS scaling
+            (canvas as any).__dpiMultiplier = this.config.dpiMultiplier;
+            (canvas as any).__naturalWidth = viewport.width / this.config.dpiMultiplier;
+            (canvas as any).__naturalHeight = viewport.height / this.config.dpiMultiplier;
 
-        const pageInfo = document.createElement('span');
-        pageInfo.className = 'pdf-page-info';
-        pageInfo.textContent = `Page ${this.state.currentPage} of ${this.state.totalPages}`;
+            const context = canvas.getContext('2d');
+            if (!context) {
+                throw new Error('Failed to get canvas context');
+            }
 
-        const scaleInfo = document.createElement('span');
-        scaleInfo.className = 'pdf-scale-info';
-        scaleInfo.textContent = `${Math.round(this.state.scale * 100)}%`;
+            // Render page at high resolution
+            const renderContext = {
+                canvasContext: context,
+                viewport: viewport
+            };
 
-        statusBar.appendChild(pageInfo);
-        statusBar.appendChild(scaleInfo);
+            const renderTask = page.render(renderContext);
+            await renderTask.promise;
 
-        // Assemble viewer
-        container.appendChild(header);
-        container.appendChild(contentArea);
-        container.appendChild(statusBar);
+            pageContainer.appendChild(canvas);
+            container.appendChild(pageContainer);
+
+            this.debugLog(`Page ${pageNumber} rendered with ${this.config.dpiMultiplier}x DPI`, {
+                pageNumber,
+                highResWidth: viewport.width,
+                highResHeight: viewport.height,
+                displayWidth: viewport.width / this.config.dpiMultiplier,
+                displayHeight: viewport.height / this.config.dpiMultiplier,
+                dpiMultiplier: this.config.dpiMultiplier
+            });
+
+        } catch (error) {
+            this.debugLog(`Error rendering page ${pageNumber}`, { error: (error as Error).message });
+            throw error;
+        }
     }
 
     /**
@@ -600,22 +943,22 @@ class PDFRenderer {
                 case 'ArrowUp':
                 case 'PageUp':
                     e.preventDefault();
-                    this.previousPage();
+                    this.scrollToTop();
                     break;
                 case 'ArrowRight':
                 case 'ArrowDown':
                 case 'PageDown':
                 case ' ':
                     e.preventDefault();
-                    this.nextPage();
+                    this.scrollToBottom();
                     break;
                 case 'Home':
                     e.preventDefault();
-                    this.goToPage(1);
+                    this.scrollToTop();
                     break;
                 case 'End':
                     e.preventDefault();
-                    this.goToPage(this.state.totalPages);
+                    this.scrollToBottom();
                     break;
                 case '+':
                 case '=':
@@ -738,9 +1081,9 @@ class PDFRenderer {
                 if (distance > 50) {
                     if (Math.abs(deltaX) > Math.abs(deltaY)) {
                         if (deltaX > 0) {
-                            this.previousPage();
+                            this.scrollToTop();
                         } else {
-                            this.nextPage();
+                            this.scrollToBottom();
                         }
                     }
                 } else if (distance < 10) {
@@ -763,25 +1106,11 @@ class PDFRenderer {
     }
 
     /**
-     * Toggle mobile controls visibility
+     * Toggle mobile controls visibility (minimal viewer - no controls to toggle)
      */
     private toggleMobileControls(): void {
-        if (!this.state.isMobile || !this.container) return;
-
-        const header = this.container.querySelector('.pdf-viewer-header') as HTMLElement;
-        const statusBar = this.container.querySelector('.pdf-viewer-status') as HTMLElement;
-
-        if (header && statusBar) {
-            const isHidden = header.style.transform === 'translateY(-100%)';
-            
-            if (isHidden) {
-                header.style.transform = 'translateY(0)';
-                statusBar.style.transform = 'translateY(0)';
-            } else {
-                header.style.transform = 'translateY(-100%)';
-                statusBar.style.transform = 'translateY(100%)';
-            }
-        }
+        // Minimal viewer has no controls to toggle
+        return;
     }
 
     /**
@@ -1431,7 +1760,7 @@ class PDFRenderer {
     }
 
     /**
-     * Render specific page
+     * Enhanced render page with CSS-based auto-fitting
      */
     private async renderPage(pageNumber: number): Promise<void> {
         if (!this.currentDocument) {
@@ -1457,47 +1786,23 @@ class PDFRenderer {
             // Intelligently reduce scale if canvas would be too large
             let canvasSize = viewport.width * viewport.height * 4; // 4 bytes per pixel
             while (canvasSize > this.config.maxCanvasSize && renderScale > this.config.minScale) {
-                renderScale = Math.max(renderScale * 0.8, this.config.minScale); // Reduce by 20% each time
+                renderScale = Math.max(renderScale * 0.8, this.config.minScale);
                 viewport = page.getViewport({ scale: renderScale });
                 canvasSize = viewport.width * viewport.height * 4;
                 scaleReduced = true;
             }
 
-            // If we still can't render at minimum scale, use emergency fallback
+            // Emergency fallback for extremely large canvases
             if (canvasSize > this.config.maxCanvasSize) {
-                // Calculate the maximum possible scale for this page
                 const maxPossibleScale = Math.sqrt(this.config.maxCanvasSize / (viewport.width * viewport.height * 4));
-                renderScale = Math.max(maxPossibleScale * 0.9, 0.1); // 90% of max with 0.1 minimum
+                renderScale = Math.max(maxPossibleScale * 0.9, 0.1);
                 viewport = page.getViewport({ scale: renderScale });
-                canvasSize = viewport.width * viewport.height * 4;
                 scaleReduced = true;
-                
-                this.debugLog('Emergency scale reduction applied', {
-                    originalScale: this.state.scale,
-                    emergencyScale: renderScale,
-                    maxPossibleScale,
-                    canvasSize,
-                    maxCanvasSize: this.config.maxCanvasSize
-                });
-            }
-
-            // Update state if scale was reduced
-            if (scaleReduced) {
-                const originalScale = this.state.scale;
-                this.state.scale = renderScale;
-                
-                // Show user notification about scale reduction
-                this.showScaleReductionNotification(originalScale, renderScale);
-                
-                this.debugLog('Scale automatically reduced', {
-                    originalScale,
-                    newScale: renderScale,
-                    canvasSize,
-                    maxCanvasSize: this.config.maxCanvasSize
-                });
             }
 
             const canvas = this.container?.querySelector('.pdf-canvas') as HTMLCanvasElement;
+            const canvasContainer = this.container?.querySelector('.pdf-canvas-container') as HTMLElement;
+            
             if (!canvas) {
                 throw new Error('Canvas element not found');
             }
@@ -1507,7 +1812,7 @@ class PDFRenderer {
                 throw new Error('Failed to get canvas context');
             }
 
-            // Set canvas dimensions
+            // Set canvas dimensions to actual PDF size
             canvas.width = viewport.width;
             canvas.height = viewport.height;
 
@@ -1520,6 +1825,12 @@ class PDFRenderer {
             await this.currentRenderTask.promise;
 
             this.state.currentPage = pageNumber;
+            
+            // Apply CSS-based fitting after rendering
+            if (canvasContainer) {
+                await this.applyCSSBasedFitting(canvasContainer);
+            }
+            
             this.updateUI();
 
             // Mark initial render as complete
@@ -1527,9 +1838,9 @@ class PDFRenderer {
                 this.isInitialRender = false;
             }
 
-            this.debugLog('Page rendered successfully', {
+            this.debugLog('Page rendered with CSS fitting', {
                 pageNumber,
-                scale: this.state.scale,
+                scale: renderScale,
                 width: viewport.width,
                 height: viewport.height,
                 canvasSize,
@@ -1538,10 +1849,9 @@ class PDFRenderer {
 
         } catch (error) {
             if (error instanceof Error && error.message.includes('cancelled')) {
-                return; // Render was cancelled, ignore
+                return;
             }
             
-            // Provide more informative error handling
             this.debugLog('Render error', { 
                 error: (error as Error).message, 
                 pageNumber,
@@ -1550,7 +1860,6 @@ class PDFRenderer {
             
             throw error;
         } finally {
-            // Always clear canvas loading state
             this.clearCanvasLoadingState();
         }
     }
@@ -1699,154 +2008,142 @@ class PDFRenderer {
     }
 
     /**
-     * Navigation methods with enhanced error handling
+     * Navigation methods for continuous scroll
+     */
+    private scrollToPage(pageNumber: number): void {
+        if (pageNumber < 1 || pageNumber > this.state.totalPages) return;
+        
+        const contentArea = this.container?.querySelector('.pdf-viewer-content') as HTMLElement;
+        const pagesContainer = contentArea?.querySelector('.pdf-pages-container') as HTMLElement;
+        
+        if (!contentArea || !pagesContainer) return;
+        
+        const pageContainer = pagesContainer.querySelector(`[data-page="${pageNumber}"]`) as HTMLElement;
+        if (!pageContainer) return;
+        
+        // Calculate scroll position
+        const containerTop = pagesContainer.offsetTop;
+        const pageTop = pageContainer.offsetTop - containerTop;
+        
+        // Scroll to page with smooth animation
+        contentArea.scrollTo({
+            top: pageTop - 20, // Small offset for better visibility
+            behavior: 'smooth'
+        });
+        
+        this.state.currentPage = pageNumber;
+        this.updateUI();
+    }
+
+    /**
+     * Legacy navigation methods (now using continuous scroll)
      */
     private async previousPage(): Promise<void> {
         if (this.state.currentPage > 1) {
-            try {
-                await this.renderPage(this.state.currentPage - 1);
-            } catch (error) {
-                this.debugLog('Previous page navigation failed', { 
-                    currentPage: this.state.currentPage,
-                    error: (error as Error).message 
-                });
-                // Don't throw - just log the error to prevent unhandled rejections
-                this.showErrorNotification('Failed to navigate to previous page');
-            }
+            this.scrollToPage(this.state.currentPage - 1);
         }
     }
 
     private async nextPage(): Promise<void> {
         if (this.state.currentPage < this.state.totalPages) {
-            try {
-                await this.renderPage(this.state.currentPage + 1);
-            } catch (error) {
-                this.debugLog('Next page navigation failed', { 
-                    currentPage: this.state.currentPage,
-                    totalPages: this.state.totalPages,
-                    error: (error as Error).message 
-                });
-                // Don't throw - just log the error to prevent unhandled rejections
-                this.showErrorNotification('Failed to navigate to next page');
-            }
+            this.scrollToPage(this.state.currentPage + 1);
         }
     }
 
     private async goToPage(pageNumber: number): Promise<void> {
-        if (pageNumber >= 1 && pageNumber <= this.state.totalPages) {
-            try {
-                await this.renderPage(pageNumber);
-            } catch (error) {
-                this.debugLog('Go to page navigation failed', { 
-                    targetPage: pageNumber,
-                    currentPage: this.state.currentPage,
-                    error: (error as Error).message 
-                });
-                // Don't throw - just log the error to prevent unhandled rejections
-                this.showErrorNotification(`Failed to navigate to page ${pageNumber}`);
-            }
-        }
+        this.scrollToPage(pageNumber);
     }
 
     /**
-     * Zoom methods with enhanced error handling
+     * Zoom methods for constrained containers (CSS-only, no re-rendering)
      */
     private async zoomIn(): Promise<void> {
         const newScale = Math.min(this.state.scale + this.config.scaleStep, this.config.maxScale);
         if (newScale !== this.state.scale) {
-            try {
                 this.state.scale = newScale;
-                await this.renderPage(this.state.currentPage);
-            } catch (error) {
-                // Revert scale on error
-                this.state.scale = this.state.scale;
-                this.debugLog('Zoom in failed', { 
-                    attemptedScale: newScale, 
-                    error: (error as Error).message 
-                });
-                throw error;
-            }
+            this.updateCanvasScales(); // Fast CSS update, no re-rendering
+            this.debugLog('Zoom in applied', { scale: this.state.scale });
         }
     }
 
     private async zoomOut(): Promise<void> {
         const newScale = Math.max(this.state.scale - this.config.scaleStep, this.config.minScale);
         if (newScale !== this.state.scale) {
-            try {
                 this.state.scale = newScale;
-                await this.renderPage(this.state.currentPage);
-            } catch (error) {
-                // Revert scale on error
-                this.state.scale = this.state.scale;
-                this.debugLog('Zoom out failed', { 
-                    attemptedScale: newScale, 
-                    error: (error as Error).message 
-                });
-                throw error;
-            }
+            this.updateCanvasScales(); // Fast CSS update, no re-rendering
+            this.debugLog('Zoom out applied', { scale: this.state.scale });
+        }
+    }
+
+    private async setZoom(scale: number): Promise<void> {
+        const newScale = Math.min(Math.max(scale, this.config.minScale), this.config.maxScale);
+        if (newScale !== this.state.scale) {
+            this.state.scale = newScale;
+            this.updateCanvasScales(); // Fast CSS update, no re-rendering
+            this.debugLog('Zoom set applied', { scale: this.state.scale });
         }
     }
 
     private async fitToWidth(): Promise<void> {
-        const canvas = this.container?.querySelector('.pdf-canvas') as HTMLCanvasElement;
-        const container = this.container?.querySelector('.pdf-viewer-content') as HTMLElement;
-        
-        if (!canvas || !container) return;
-
-        const containerWidth = container.clientWidth - 32; // Account for padding
-        const canvasWidth = canvas.width / this.state.scale;
-        const newScale = Math.min(containerWidth / canvasWidth, this.config.maxScale);
+        // For constrained containers, fit to width means scale to fill container width
+        // Since containers are already sized to fit available width, use scale 1.0
+        const newScale = 1.0;
         
         if (newScale !== this.state.scale) {
             this.state.scale = newScale;
-            await this.renderPage(this.state.currentPage);
+            this.updateCanvasScales(); // Fast CSS update, no re-rendering
+            this.debugLog('Fit to width applied', { scale: this.state.scale });
+        }
+    }
+
+    private async resetZoom(): Promise<void> {
+        if (this.state.scale !== 1.0) {
+            this.state.scale = 1.0;
+            this.updateCanvasScales(); // Fast CSS update, no re-rendering
+            this.debugLog('Zoom reset applied', { scale: this.state.scale });
         }
     }
 
     /**
-     * Set specific zoom level with enhanced error handling
+     * Update canvas scales without re-rendering (fast CSS-only zoom)
      */
-    private async setZoom(scale: number): Promise<void> {
-        const newScale = Math.min(Math.max(scale, this.config.minScale), this.config.maxScale);
-        if (newScale !== this.state.scale) {
-            const previousScale = this.state.scale;
-            try {
-                this.state.scale = newScale;
-                await this.renderPage(this.state.currentPage);
-            } catch (error) {
-                // Revert scale on error
-                this.state.scale = previousScale;
-                this.debugLog('Set zoom failed', { 
-                    attemptedScale: newScale, 
-                    revertedTo: previousScale,
-                    error: (error as Error).message 
+    private updateCanvasScales(): void {
+        const pagesContainer = this.container?.querySelector('.pdf-pages-container') as HTMLElement;
+        if (!pagesContainer) return;
+
+        const pageContainers = pagesContainer.querySelectorAll('.pdf-page-container');
+        pageContainers.forEach((pageContainer) => {
+            const containerElement = pageContainer as HTMLElement;
+            const canvas = containerElement.querySelector('.pdf-page-canvas') as HTMLCanvasElement;
+            const baseScale = (containerElement as any).__baseScale || 1.0;
+            const dpiCompensation = (containerElement as any).__dpiCompensation || 1.0;
+            
+            if (canvas) {
+                // Apply user zoom on top of base scale with DPI compensation
+                const finalScale = baseScale * this.state.scale * dpiCompensation;
+                canvas.style.transform = `scale(${finalScale})`;
+                
+                this.debugLog('Canvas scale updated with DPI compensation', { 
+                    baseScale, 
+                    userScale: this.state.scale,
+                    dpiCompensation,
+                    finalScale 
                 });
-                throw error;
             }
-        }
+        });
     }
 
     /**
-     * Fit page to container
+     * Fit pages to container (constrained - only affects content zoom)
      */
     private async fitToPage(): Promise<void> {
-        const canvas = this.container?.querySelector('.pdf-canvas') as HTMLCanvasElement;
-        const container = this.container?.querySelector('.pdf-viewer-content') as HTMLElement;
-        
-        if (!canvas || !container) return;
-
-        const containerWidth = container.clientWidth - 32;
-        const containerHeight = container.clientHeight - 32;
-        const canvasWidth = canvas.width / this.state.scale;
-        const canvasHeight = canvas.height / this.state.scale;
-        
-        const scaleX = containerWidth / canvasWidth;
-        const scaleY = containerHeight / canvasHeight;
-        const newScale = Math.min(scaleX, scaleY, this.config.maxScale);
+        // Reset to 1.0 scale for constrained containers
+        const newScale = 1.0;
         
         if (newScale !== this.state.scale) {
             this.state.scale = newScale;
-            await this.renderPage(this.state.currentPage);
+            this.updateCanvasScales(); // Fast CSS update, no re-rendering
+            this.debugLog('Fit to page applied', { scale: this.state.scale });
         }
     }
 
@@ -2092,73 +2389,12 @@ class PDFRenderer {
     }
 
     /**
-     * Update UI elements
+     * Update UI elements (minimal viewer - very limited UI to update)
      */
     private updateUI(): void {
-        // Update page info
-        const pageInfo = this.container?.querySelector('.pdf-page-info');
-        if (pageInfo) {
-            pageInfo.textContent = `Page ${this.state.currentPage} of ${this.state.totalPages}`;
-        }
-
-        // Update scale info
-        const scaleInfo = this.container?.querySelector('.pdf-scale-info');
-        if (scaleInfo) {
-            scaleInfo.textContent = `${Math.round(this.state.scale * 100)}%`;
-        }
-
-        // Update page input
-        const pageInput = this.container?.querySelector('.pdf-page-input') as HTMLInputElement;
-        if (pageInput) {
-            pageInput.value = this.state.currentPage.toString();
-            pageInput.max = this.state.totalPages.toString();
-        }
-
-        // Update navigation buttons
-        const firstBtn = this.container?.querySelector('.pdf-first-btn') as HTMLButtonElement;
-        const prevBtn = this.container?.querySelector('.pdf-prev-btn') as HTMLButtonElement;
-        const nextBtn = this.container?.querySelector('.pdf-next-btn') as HTMLButtonElement;
-        const lastBtn = this.container?.querySelector('.pdf-last-btn') as HTMLButtonElement;
-        
-        if (firstBtn) {
-            firstBtn.disabled = this.state.currentPage <= 1;
-        }
-        if (prevBtn) {
-            prevBtn.disabled = this.state.currentPage <= 1;
-        }
-        if (nextBtn) {
-            nextBtn.disabled = this.state.currentPage >= this.state.totalPages;
-        }
-        if (lastBtn) {
-            lastBtn.disabled = this.state.currentPage >= this.state.totalPages;
-        }
-
-        // Update zoom buttons
-        const zoomOutBtn = this.container?.querySelector('.pdf-zoom-out-btn') as HTMLButtonElement;
-        const zoomInBtn = this.container?.querySelector('.pdf-zoom-in-btn') as HTMLButtonElement;
-        
-        if (zoomOutBtn) {
-            zoomOutBtn.disabled = this.state.scale <= this.config.minScale;
-        }
-        if (zoomInBtn) {
-            zoomInBtn.disabled = this.state.scale >= this.config.maxScale;
-        }
-
-        // Update zoom select dropdown
-        this.updateZoomSelect();
-
-        // Update fullscreen button
-        const fullscreenBtn = this.container?.querySelector('.pdf-fullscreen-btn') as HTMLButtonElement;
-        if (fullscreenBtn) {
-            const icon = fullscreenBtn.querySelector('i');
-            if (icon) {
-                icon.className = this.state.isFullscreen ? 'fas fa-compress' : 'fas fa-expand';
-            }
-            fullscreenBtn.title = this.state.isFullscreen ? 'Exit fullscreen (Esc)' : 'Toggle fullscreen (Ctrl+F)';
-        }
-
-        // Add mobile CSS if needed
-        this.addMobileStyles();
+        // Minimal viewer has no UI elements to update
+        // Page tracking is handled by scroll events
+        return;
     }
 
     /**
@@ -2208,11 +2444,6 @@ class PDFRenderer {
                     display: none !important;
                 }
 
-                .pdf-viewer-status {
-                    font-size: 11px !important;
-                    padding: 6px 12px !important;
-                }
-
                 .pdf-canvas-container {
                     margin: 8px !important;
                 }
@@ -2230,10 +2461,6 @@ class PDFRenderer {
             }
 
             .pdf-fullscreen .pdf-viewer-header {
-                transition: transform 0.3s ease;
-            }
-
-            .pdf-fullscreen .pdf-viewer-status {
                 transition: transform 0.3s ease;
             }
 
@@ -2398,7 +2625,7 @@ class PDFRenderer {
     }
 
     /**
-     * Cleanup resources
+     * Enhanced cleanup with ResizeObserver
      */
     private cleanup(): void {
         // Cancel any ongoing render task
@@ -2413,6 +2640,25 @@ class PDFRenderer {
             this.currentDocument = null;
         }
 
+        // Clear page cache
+        this.pageCache.clear();
+
+        // Clear text content cache
+        this.pageTextContent.clear();
+
+        // Disconnect ResizeObserver
+        if (this.resizeObserver) {
+            this.resizeObserver.disconnect();
+        }
+
+        // Clear event listeners
+        this.eventListeners.forEach((listeners, event) => {
+            listeners.forEach(listener => {
+                document.removeEventListener(event, listener);
+            });
+        });
+        this.eventListeners.clear();
+
         // Clear state
         this.state.currentPage = 1;
         this.state.totalPages = 0;
@@ -2420,6 +2666,8 @@ class PDFRenderer {
         this.state.searchTerm = '';
         this.state.searchResults = [];
         this.state.currentSearchIndex = -1;
+
+        this.debugLog('PDF renderer cleanup completed');
     }
 
     /**
@@ -2427,7 +2675,6 @@ class PDFRenderer {
      */
     public destroy(): void {
         this.cleanup();
-        this.eventListeners.clear();
         this.isInitialized = false;
         this.state.isInitialized = false;
     }
