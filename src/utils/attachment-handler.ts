@@ -175,6 +175,11 @@ export const getAttachmentManager = AttachmentManagerSingleton.getInstance;
  */
 class AttachmentHandler {
     /**
+     * File type categories to open with native OS viewer
+     */
+    static readonly NATIVE_PREVIEW_TYPES: FileTypeCategory[] = ['pdf', 'document', 'archive', 'video', 'audio'];
+
+    /**
      * Supported file types for preview
      */
     static readonly PREVIEWABLE_TYPES: Record<FileTypeCategory, string[]> = {
@@ -475,206 +480,6 @@ class AttachmentHandler {
             const fileType = this.getFileTypeCategory(attachment.contentType);
             
             switch (fileType) {
-                case 'pdf':
-                    this.debugLog('PDF Preview', 'Creating ultra-minimal PDF preview');
-                    
-                    try {
-                        // Try advanced PDF renderer first
-                        let pdfElement: HTMLElement | null = null;
-                        
-                        try {
-                            // Import PDF renderer dynamically
-                            const { default: PDFRenderer } = await import('../ui/pdf-renderer.js');
-                            
-                            // Create minimal PDF renderer element (no wrapper)
-                            const pdfElement = document.createElement('div');
-                            pdfElement.style.cssText = `
-                                width: 100%;
-                                height: 100%;
-                                border: none;
-                                background: white;
-                                border-radius: 4px;
-                                overflow: hidden;
-                                margin: 0;
-                                padding: 0;
-                            `;
-                            
-                            // Initialize PDF renderer with CSS-based auto-fitting
-                            const pdfRenderer = PDFRenderer.getInstance({
-                                defaultScale: 1.0, // Let CSS handle the fitting
-                                enableSearch: true,
-                                enableNavigation: true,
-                                enableZoom: true,
-                                renderTimeout: 15000 // 15 second timeout
-                            });
-                            
-                            // Create PDF viewer directly in the element
-                            await pdfRenderer.createPDFViewer(attachment, pdfElement);
-                            
-                            return pdfElement; // Return directly, no wrapper
-                            
-                        } catch (advancedError) {
-                            this.debugLog('PDF Preview', 'Advanced PDF renderer failed, trying simple loader', { error: advancedError });
-                            
-                            // Try simple PDF loader as fallback
-                            const { default: PDFJSLoader } = await import('../ui/pdf-loader.js');
-                            const pdfLoader = PDFJSLoader.getInstance();
-                            
-                            // Create simple PDF container (content-based sizing)
-                            const simplePdfElement = document.createElement('div');
-                            simplePdfElement.style.cssText = `
-                                width: 100%;
-                                height: 100%;
-                                border: none;
-                                background: white;
-                                border-radius: 4px;
-                                overflow: hidden;
-                                display: flex;
-                                flex-direction: column;
-                                margin: 0;
-                                padding: 0;
-                            `;
-                            
-                            // Add header
-                            const header = document.createElement('div');
-                            header.style.cssText = `
-                                background: #f8f9fa;
-                                padding: 8px 16px;
-                                border-bottom: 1px solid #dee2e6;
-                                font-size: 14px;
-                                color: #495057;
-                            `;
-                            header.innerHTML = `
-                                <i class="fas fa-file-pdf" style="color: #dc3545; margin-right: 8px;"></i>
-                                ${attachment.filename || 'PDF Document'}
-                            `;
-                            
-                            // Create canvas for PDF
-                            const canvas = document.createElement('canvas');
-                            canvas.style.cssText = `
-                                flex: 1;
-                                max-width: 100%;
-                                max-height: 100%;
-                                object-fit: contain;
-                                margin: auto;
-                                display: block;
-                            `;
-                            
-                            simplePdfElement.appendChild(header);
-                            simplePdfElement.appendChild(canvas);
-                            
-                            // Get PDF data safely using data processor
-                            const { default: AttachmentDataProcessor } = await import('./attachment-data-processor.js');
-                            const arrayBuffer = await AttachmentDataProcessor.getArrayBuffer(attachment);
-                            const uint8Array = new Uint8Array(arrayBuffer);
-                            
-                            // Load and render PDF
-                            const pdfDocument = await pdfLoader.createPDFDocument(uint8Array);
-                            await pdfLoader.renderPDFToCanvas(pdfDocument, 1, canvas, 1.2);
-                            
-                            this.debugLog('PDF Preview', 'Simple PDF loader succeeded');
-                            return simplePdfElement; // Return directly, no wrapper
-                        }
-                        
-                        throw new Error('All PDF rendering methods failed');
-                        
-                                            } catch (pdfError) {
-                        this.debugLog('PDF Preview', 'PDF.js renderer failed, falling back to iframe', { 
-                            error: pdfError,
-                            errorMessage: (pdfError as Error).message,
-                            errorStack: (pdfError as Error).stack,
-                            attachmentInfo: {
-                                filename: attachment.filename,
-                                contentType: attachment.contentType,
-                                size: attachment.size,
-                                hasContent: !!attachment.content,
-                                hasAttachmentId: !!attachment.attachmentId
-                            }
-                        });
-                        
-                        // Show detailed error in console for debugging
-                        console.error('PDF.js detailed error:', pdfError);
-                        
-                        // Fallback to iframe if PDF.js fails (content-based sizing)
-                        const fallbackElement = document.createElement('div');
-                        fallbackElement.style.cssText = `
-                            width: 100%;
-                            height: 100%;
-                            display: flex;
-                            flex-direction: column;
-                            background: white;
-                            border-radius: 4px;
-                            overflow: hidden;
-                            margin: 0;
-                            padding: 0;
-                        `;
-                        
-                        // Show fallback message
-                        const fallbackMessage = document.createElement('div');
-                        fallbackMessage.style.cssText = `
-                            background: #fff3cd;
-                            color: #856404;
-                            padding: 8px 16px;
-                            border-bottom: 1px solid #ffeaa7;
-                            font-size: 12px;
-                            display: flex;
-                            align-items: center;
-                            gap: 8px;
-                        `;
-                        fallbackMessage.innerHTML = `
-                            <i class="fas fa-exclamation-triangle"></i>
-                            <span>Using browser's default PDF viewer (PDF.js advanced features unavailable)</span>
-                        `;
-                        
-                        // Create fallback iframe
-                        try {
-                            const pdfUrl = await this.createDataURL(attachment);
-                            const fallbackIframe = document.createElement('iframe');
-                            fallbackIframe.src = pdfUrl;
-                            fallbackIframe.style.cssText = `
-                                width: 100%;
-                                height: 100%;
-                                border: none;
-                                background: white;
-                            `;
-                            
-                            fallbackElement.appendChild(fallbackMessage);
-                            fallbackElement.appendChild(fallbackIframe);
-                            
-                        } catch (fallbackError) {
-                            this.debugLog('PDF Preview', 'Fallback iframe also failed', { error: fallbackError });
-                            
-                            // Show error message
-                            const errorMessage = document.createElement('div');
-                            errorMessage.style.cssText = `
-                                padding: 40px;
-                                text-align: center;
-                                color: #d32f2f;
-                                background: #ffebee;
-                                height: 100%;
-                                display: flex;
-                                flex-direction: column;
-                                align-items: center;
-                                justify-content: center;
-                            `;
-                            errorMessage.innerHTML = `
-                                <i class="fas fa-exclamation-circle" style="font-size: 48px; margin-bottom: 16px;"></i>
-                                <h3 style="margin: 0 0 8px 0;">PDF Preview Error</h3>
-                                <p style="margin: 0; color: #666;">
-                                    Unable to preview this PDF file. You can still download it using the download button.
-                                </p>
-                                <p style="margin: 16px 0 0 0; font-size: 12px; color: #999;">
-                                    Error: ${(pdfError as Error).message}
-                                </p>
-                            `;
-                            
-                            fallbackElement.appendChild(errorMessage);
-                        }
-                        
-                        return fallbackElement; // Return directly, no wrapper
-                    }
-                    break;
-
                 case 'image':
                     this.debugLog('Image Preview', 'Creating image preview');
                     const imgUrl = await this.createDataURL(attachment);
@@ -1061,27 +866,89 @@ class AttachmentHandler {
         });
 
         try {
-            const modal = await this.createPreviewModal(attachment);
-            document.body.appendChild(modal);
+            const fileType = this.getFileTypeCategory(attachment.contentType);
+
+            if (AttachmentHandler.NATIVE_PREVIEW_TYPES.includes(fileType)) {
+                this.debugLog('Native Preview', `Requesting native OS preview for ${fileType} attachment`);
+
+                // Add security and size checks before proceeding
+                const MAX_PREVIEW_SIZE = 200 * 1024 * 1024; // 200 MB
+                if (attachment.size > MAX_PREVIEW_SIZE) {
+                    if (typeof (window as any).showNotification !== 'undefined') {
+                        (window as any).showNotification('File is too large for preview (> 200MB). Please download it instead.', 'warning');
+                    }
+                    return; // Stop the preview
+                }
+
+                const dangerousExtensions = ['.exe', '.bat', '.cmd', '.msi', '.scr'];
+                const filename = attachment.filename || attachment.name || '';
+                const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
             
-            // Force layout calculation before showing modal
-            modal.offsetHeight; // Force reflow
-            
-            // Show modal with animation - use setTimeout to ensure proper timing
-            setTimeout(() => {
-                modal.style.opacity = '1';
-                const modalContent = modal.querySelector('.modal-content') as HTMLElement;
-                if (modalContent) {
-                    modalContent.style.transform = 'translateY(0)';
+                if (dangerousExtensions.includes(ext)) {
+                    if (typeof (window as any).showNotification !== 'undefined') {
+                        (window as any).showNotification('Warning: This file type may be dangerous. Opening with caution.', 'warning');
+                    }
+                    // Add a delay to give the user time to see the warning
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                }
+
+                // Ensure content is available, especially for lazy-loaded Gmail attachments
+                if (!attachment.content && attachment.attachmentId) {
+                    const manager = AttachmentManagerSingleton.getInstance();
+                    attachment.content = await manager.fetchGmailAttachmentContent(attachment);
+                }
+
+                if (!attachment.content) {
+                    throw new Error('Attachment content is not available for native preview.');
                 }
                 
-                this.debugLog('Modal Display', 'Modal animation started', {
-                    modalOpacity: modal.style.opacity,
-                    contentTransform: modalContent?.style.transform,
-                    modalRect: modal.getBoundingClientRect(),
-                    contentRect: modalContent?.getBoundingClientRect()
+                // The content could be a Buffer or a string, ensure it's base64
+                let base64Content: string;
+                if (typeof attachment.content === 'string') {
+                    base64Content = attachment.content;
+                } else if (Buffer.isBuffer(attachment.content)) {
+                    base64Content = attachment.content.toString('base64');
+                } else {
+                    throw new Error('Unsupported attachment content type for native preview.');
+                }
+
+                // Send data to main process to handle file saving and opening
+                const ipcRenderer = (window as any).require('electron').ipcRenderer;
+                const result = await ipcRenderer.invoke('preview-file-native', {
+                    filename: attachment.filename || 'attachment.dat',
+                    data: base64Content
                 });
-            }, 10); // Small delay to ensure DOM is ready
+
+                if (!result.success) {
+                    throw new Error(result.error || `Failed to open ${fileType} in native viewer.`);
+                }
+
+                if (typeof (window as any).showNotification !== 'undefined') {
+                    (window as any).showNotification(`Opening ${attachment.filename} in your default app...`, 'info');
+                }
+            } else {
+                const modal = await this.createPreviewModal(attachment);
+                document.body.appendChild(modal);
+
+                // Force layout calculation before showing modal
+                modal.offsetHeight; // Force reflow
+
+                // Show modal with animation - use setTimeout to ensure proper timing
+                setTimeout(() => {
+                    modal.style.opacity = '1';
+                    const modalContent = modal.querySelector('.modal-content') as HTMLElement;
+                    if (modalContent) {
+                        modalContent.style.transform = 'translateY(0)';
+                    }
+                    
+                    this.debugLog('Modal Display', 'Modal animation started', {
+                        modalOpacity: modal.style.opacity,
+                        contentTransform: modalContent?.style.transform,
+                        modalRect: modal.getBoundingClientRect(),
+                        contentRect: modalContent?.getBoundingClientRect()
+                    });
+                }, 10); // Small delay to ensure DOM is ready
+            }
 
         } catch (error) {
             const endTime = performance.now();
@@ -1215,61 +1082,6 @@ class AttachmentHandler {
     }
 
     /**
-     * Resize modal for PDF based on PDF dimensions and orientation (80% window height)
-     */
-    private static resizeModalForPDF(modalContent: HTMLElement, pdfWidth: number, pdfHeight: number, orientation: 'portrait' | 'landscape'): void {
-        const screenWidth = window.innerWidth;
-        const screenHeight = window.innerHeight;
-        const maxWidth = screenWidth - 40; // Account for modal padding
-        const maxHeight = (screenHeight * 0.8) - 40; // 80% of window height minus padding
-        
-        // Calculate PDF aspect ratio
-        const pdfAspectRatio = pdfWidth / pdfHeight;
-        
-        let targetWidth: number;
-        let targetHeight: number;
-        
-        if (orientation === 'landscape') {
-            // Landscape: prioritize width, adjust height (80% window height)
-            targetWidth = Math.min(maxWidth, Math.max(800, pdfWidth * 0.8));
-            targetHeight = targetWidth / pdfAspectRatio;
-            
-            // If height exceeds 80% of screen, scale down proportionally
-            if (targetHeight > maxHeight) {
-                targetHeight = maxHeight;
-                targetWidth = targetHeight * pdfAspectRatio;
-            }
-        } else {
-            // Portrait: prioritize height, adjust width (80% window height)
-            targetHeight = Math.min(maxHeight, Math.max(600, Math.min(pdfHeight * 0.8, screenHeight * 0.8)));
-            targetWidth = targetHeight * pdfAspectRatio;
-            
-            // If width exceeds screen, scale down proportionally
-            if (targetWidth > maxWidth) {
-                targetWidth = maxWidth;
-                targetHeight = targetWidth / pdfAspectRatio;
-            }
-        }
-        
-        // Apply width but let height be determined by content
-        modalContent.style.width = `${Math.round(targetWidth)}px`;
-        modalContent.style.height = 'fit-content'; // Let content determine height
-        modalContent.style.minWidth = '320px'; // Ensure minimum width
-        modalContent.style.minHeight = '200px'; // Ensure minimum height
-        modalContent.style.maxHeight = `${Math.round(targetHeight)}px`; // Prevent overflow
-        
-        AttachmentHandler.debugLog('Modal Resize', 'Resized modal for PDF (80% window height)', {
-            pdfDimensions: { width: pdfWidth, height: pdfHeight },
-            orientation,
-            aspectRatio: pdfAspectRatio,
-            modalDimensions: { width: targetWidth, height: targetHeight },
-            screenConstraints: { maxWidth, maxHeight },
-            windowHeight: screenHeight,
-            eightyPercentHeight: screenHeight * 0.8
-        });
-    }
-
-    /**
      * Create preview modal
      */
     private static async createPreviewModal(attachment: Attachment): Promise<HTMLElement> {
@@ -1307,19 +1119,18 @@ class AttachmentHandler {
         `;
 
         try {
-            // Create modal content container (dynamically sized for PDFs)
+            // Create modal content container
             const modalContent = document.createElement('div');
             modalContent.className = 'modal-content';
-            const isPDF = this.getFileTypeCategory(attachment.contentType) === 'pdf';
             
             // Content-based sizing with 80% window height
             modalContent.style.cssText = `
                 background: white;
-                border-radius: ${isPDF ? '8px' : '12px'};
+                border-radius: 12px;
                 max-width: calc(100vw - 40px);
                 max-height: calc(80vh - 40px);
-                width: ${isPDF ? 'fit-content' : 'auto'};
-                height: ${isPDF ? 'fit-content' : '80vh'};
+                width: auto;
+                height: 80vh;
                 overflow: hidden;
                 position: relative;
                 box-shadow: 0 2px 16px rgba(0, 0, 0, 0.15);
@@ -1330,170 +1141,115 @@ class AttachmentHandler {
                 transform: translateY(10px);
                 transition: transform 0.2s ease-in-out;
             `;
-            
-            // Store reference for PDF renderer callback
-            if (isPDF) {
-                (window as any).__currentPDFModal = {
-                    modalContent,
-                    resizeModal: (pdfWidth: number, pdfHeight: number, orientation: 'portrait' | 'landscape') => {
-                        AttachmentHandler.resizeModalForPDF(modalContent, pdfWidth, pdfHeight, orientation);
-                    }
-                };
-            }
 
-            // Create minimal header only for non-PDF files
+            // Create minimal header
             let header: HTMLElement | null = null;
             
-            if (!isPDF) {
-                header = document.createElement('div');
-                header.style.cssText = `
-                    padding: 16px 20px;
-                    border-bottom: 1px solid #eee;
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    background: #f8f9fa;
-                    flex-shrink: 0;
-                `;
+            header = document.createElement('div');
+            header.style.cssText = `
+                padding: 16px 20px;
+                border-bottom: 1px solid #eee;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                background: #f8f9fa;
+                flex-shrink: 0;
+            `;
 
-                // Create title section
-                const titleSection = document.createElement('div');
-                const fileName = attachment.filename || attachment.name || 'Attachment';
-                const fileSize = this.formatFileSize(attachment.size);
-                const fileIcon = this.getFileIcon(attachment.contentType, attachment.filename);
-                
-                titleSection.innerHTML = `
-                    <h3 id="preview-title" style="margin: 0; font-size: 16px; color: #333; display: flex; align-items: center; gap: 8px;">
-                        <i class="${fileIcon}" aria-hidden="true" style="font-size: 20px; color: #666;"></i>
-                        <span style="word-break: break-word; max-width: 500px; overflow: hidden; text-overflow: ellipsis;">${fileName}</span>
-                    </h3>
-                    <p style="margin: 4px 0 0 28px; color: #666; font-size: 13px;">${fileSize} • ${attachment.contentType}</p>
-                `;
+            // Create title section
+            const titleSection = document.createElement('div');
+            const fileName = attachment.filename || attachment.name || 'Attachment';
+            const fileSize = this.formatFileSize(attachment.size);
+            const fileIcon = this.getFileIcon(attachment.contentType, attachment.filename);
+            
+            titleSection.innerHTML = `
+                <h3 id="preview-title" style="margin: 0; font-size: 16px; color: #333; display: flex; align-items: center; gap: 8px;">
+                    <i class="${fileIcon}" aria-hidden="true" style="font-size: 20px; color: #666;"></i>
+                    <span style="word-break: break-word; max-width: 500px; overflow: hidden; text-overflow: ellipsis;">${fileName}</span>
+                </h3>
+                <p style="margin: 4px 0 0 28px; color: #666; font-size: 13px;">${fileSize} • ${attachment.contentType}</p>
+            `;
 
-                // Create actions section
-                const actions = document.createElement('div');
-                actions.style.cssText = `
-                    display: flex;
-                    gap: 8px;
-                    align-items: center;
-                `;
+            // Create actions section
+            const actions = document.createElement('div');
+            actions.style.cssText = `
+                display: flex;
+                gap: 8px;
+                align-items: center;
+            `;
 
-                // Create download button
-                const downloadBtn = document.createElement('button');
-                downloadBtn.innerHTML = '<i class="fas fa-download" aria-hidden="true"></i>';
-                downloadBtn.title = 'Download';
-                downloadBtn.setAttribute('aria-label', 'Download attachment');
-                downloadBtn.style.cssText = `
-                    background: #f0f0f0;
-                    border: none;
-                    border-radius: 6px;
-                    padding: 8px;
-                    cursor: pointer;
-                    color: #444;
-                    transition: all 0.2s ease;
-                `;
-                downloadBtn.addEventListener('mouseover', () => downloadBtn.style.background = '#e0e0e0');
-                downloadBtn.addEventListener('mouseout', () => downloadBtn.style.background = '#f0f0f0');
-                downloadBtn.addEventListener('click', () => this.downloadAttachment(attachment));
+            // Create download button
+            const downloadBtn = document.createElement('button');
+            downloadBtn.innerHTML = '<i class="fas fa-download" aria-hidden="true"></i>';
+            downloadBtn.title = 'Download';
+            downloadBtn.setAttribute('aria-label', 'Download attachment');
+            downloadBtn.style.cssText = `
+                background: #f0f0f0;
+                border: none;
+                border-radius: 6px;
+                padding: 8px;
+                cursor: pointer;
+                color: #444;
+                transition: all 0.2s ease;
+            `;
+            downloadBtn.addEventListener('mouseover', () => downloadBtn.style.background = '#e0e0e0');
+            downloadBtn.addEventListener('mouseout', () => downloadBtn.style.background = '#f0f0f0');
+            downloadBtn.addEventListener('click', () => this.downloadAttachment(attachment));
 
-                actions.appendChild(downloadBtn);
-                header.appendChild(titleSection);
-                header.appendChild(actions);
-            }
+            actions.appendChild(downloadBtn);
+            header.appendChild(titleSection);
+            header.appendChild(actions);
 
-            // Create close button (floating for PDFs, in header for others)
+            // Create close button
             const closeBtn = document.createElement('button');
             closeBtn.innerHTML = '<i class="fas fa-times" aria-hidden="true"></i>';
             closeBtn.title = 'Close';
             closeBtn.setAttribute('aria-label', 'Close preview');
             
-            if (isPDF) {
-                // Floating close button for minimal PDF viewer
-                closeBtn.style.cssText = `
-                    position: absolute;
-                    top: 16px;
-                    right: 16px;
-                    background: rgba(0, 0, 0, 0.7);
-                    border: none;
-                    border-radius: 50%;
-                    width: 32px;
-                    height: 32px;
-                    cursor: pointer;
-                    color: white;
-                    font-size: 14px;
-                    z-index: 1000;
-                    transition: all 0.2s ease;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    backdrop-filter: blur(10px);
-                `;
-                closeBtn.addEventListener('mouseover', () => {
-                    closeBtn.style.background = 'rgba(0, 0, 0, 0.9)';
-                    closeBtn.style.transform = 'scale(1.1)';
-                });
-                closeBtn.addEventListener('mouseout', () => {
-                    closeBtn.style.background = 'rgba(0, 0, 0, 0.7)';
-                    closeBtn.style.transform = 'scale(1.0)';
-                });
-            } else {
-                // Header close button for non-PDFs
-                closeBtn.style.cssText = `
-                    background: #f0f0f0;
-                    border: none;
-                    border-radius: 6px;
-                    padding: 8px;
-                    cursor: pointer;
-                    color: #444;
-                    transition: all 0.2s ease;
-                `;
-                closeBtn.addEventListener('mouseover', () => closeBtn.style.background = '#e0e0e0');
-                closeBtn.addEventListener('mouseout', () => closeBtn.style.background = '#f0f0f0');
-                
-                if (header) {
-                    const actions = header.querySelector('div[style*="gap: 8px"]') as HTMLElement;
-                    if (actions) actions.appendChild(closeBtn);
-                }
+            closeBtn.style.cssText = `
+                background: #f0f0f0;
+                border: none;
+                border-radius: 6px;
+                padding: 8px;
+                cursor: pointer;
+                color: #444;
+                transition: all 0.2s ease;
+            `;
+            closeBtn.addEventListener('mouseover', () => closeBtn.style.background = '#e0e0e0');
+            closeBtn.addEventListener('mouseout', () => closeBtn.style.background = '#f0f0f0');
+            
+            if (header) {
+                const actions = header.querySelector('div[style*="gap: 8px"]') as HTMLElement;
+                if (actions) actions.appendChild(closeBtn);
             }
 
             // Create preview content directly without extra wrapper
             const previewContent = await this.createAttachmentPreview(attachment);
             
-            // For PDFs, previewContent already has proper structure - don't wrap it
-            // For other files, create a proper container
-            let finalPreviewElement: HTMLElement;
-            
-            if (isPDF) {
-                // PDF content already has proper structure, use it directly
-                finalPreviewElement = previewContent;
-            } else {
-                // For non-PDF files, create wrapper with proper sizing (80% height)
-                const previewContainer = document.createElement('div');
-                previewContainer.className = 'preview-container';
-                previewContainer.style.cssText = `
-                    flex: 1;
-                    overflow: hidden;
-                    padding: 0;
-                    margin: 0;
-                    display: flex;
-                    justify-content: center;
-                    align-items: flex-start;
-                    background: ${this.getFileTypeCategory(attachment.contentType) === 'image' ? '#f0f0f0' : 'white'};
-                    min-height: 400px;
-                    height: calc(80vh - 120px);
-                    position: relative;
-                `;
-                previewContainer.appendChild(previewContent);
-                finalPreviewElement = previewContainer;
-            }
+            // For non-PDF files, create wrapper with proper sizing (80% height)
+            const previewContainer = document.createElement('div');
+            previewContainer.className = 'preview-container';
+            previewContainer.style.cssText = `
+                flex: 1;
+                overflow: hidden;
+                padding: 0;
+                margin: 0;
+                display: flex;
+                justify-content: center;
+                align-items: flex-start;
+                background: ${this.getFileTypeCategory(attachment.contentType) === 'image' ? '#f0f0f0' : 'white'};
+                min-height: 400px;
+                height: calc(80vh - 120px);
+                position: relative;
+            `;
+            previewContainer.appendChild(previewContent);
+            const finalPreviewElement = previewContainer;
             
             // Debug container dimensions
-            this.debugLog('Preview Container', `Container optimized for ${isPDF ? 'minimal PDF viewer' : 'standard preview'}`, {
-                isPDF,
-                hasHeader: !isPDF,
-                containerStyle: isPDF ? 'direct PDF content' : finalPreviewElement.style.cssText,
+            this.debugLog('Preview Container', `Container optimized for standard preview`, {
+                hasHeader: true,
+                containerStyle: finalPreviewElement.style.cssText,
                 contentType: attachment.contentType,
-                standardPaperRatio: 8.5 / 11
             });
 
             // Assemble modal
@@ -1501,11 +1257,6 @@ class AttachmentHandler {
                 modalContent.appendChild(header);
             }
             modalContent.appendChild(finalPreviewElement);
-            
-            // Add floating close button for PDFs
-            if (isPDF) {
-                modalContent.appendChild(closeBtn);
-            }
             
             modal.appendChild(modalContent);
 

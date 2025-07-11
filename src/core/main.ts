@@ -1,10 +1,12 @@
-import { app, BrowserWindow, ipcMain, dialog, Menu, IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, Menu, IpcMainInvokeEvent, shell } from 'electron';
 import * as path from 'path';
-import * as fs from 'fs';
+import * as fs from 'fs'; // Use standard fs for sync methods
+import { promises as fsPromises } from 'fs'; // Use promises for async methods
 import { URLSearchParams } from 'url';
 import * as http from 'http';
 import * as net from 'net';
 import { fileURLToPath } from 'url';
+import { v4 as uuidv4 } from 'uuid';
 import { OAUTH_CONFIG } from '../config/config.js';
 import '../utils/attachment-handler.js';
 
@@ -30,6 +32,7 @@ let oauthServer: http.Server | null = null;
 let oauthResolve: ((value: any) => void) | null = null;
 let oauthInProgress = false;
 let googleAuthToken: any = null;
+const temporaryFiles = new Set<string>();
 
 // Load Google token at startup
 const tokenPath = path.join(app.getPath('userData'), 'google-token.json');
@@ -81,6 +84,19 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+});
+
+app.on('will-quit', async () => {
+    // Clean up temporary files
+    console.log(`Cleaning up ${temporaryFiles.size} temporary files...`);
+    for (const filePath of temporaryFiles) {
+        try {
+            await fsPromises.unlink(filePath);
+            console.log(`Deleted temporary file: ${filePath}`);
+        } catch (error) {
+            console.error(`Failed to delete temporary file: ${filePath}`, error);
+        }
+    }
 });
 
 app.on('window-all-closed', () => {
@@ -1023,6 +1039,42 @@ ipcMain.handle('fetch-gmail-raw-message', async (_event, { messageId, auth }) =>
     const err = error && typeof error === 'object' && 'message' in error ? (error as any).message : String(error);
     return { success: false, error: err };
   }
+});
+
+// IPC handler for opening a file in the native viewer
+ipcMain.handle('preview-file-native', async (event, args) => {
+    const { filename, data } = args;
+
+    if (!data) {
+        return { success: false, error: 'No data provided for PDF preview.' };
+    }
+
+    const tempDir = app.getPath('temp');
+    // Sanitize filename to prevent path traversal issues
+    const safeFilename = path.basename(filename).replace(/[^a-zA-Z0-9_.-]/g, '_');
+    const tempFilePath = path.join(tempDir, `${uuidv4()}-${safeFilename}`);
+
+    try {
+        // Data is base64 encoded, so we need to decode it to a buffer
+        const pdfBuffer = Buffer.from(data, 'base64');
+        await fsPromises.writeFile(tempFilePath, pdfBuffer);
+
+        // Track the file for cleanup
+        temporaryFiles.add(tempFilePath);
+        console.log(`Created temporary file: ${tempFilePath}`);
+
+        // Open the file in the default system viewer
+        await shell.openPath(tempFilePath);
+
+        // Note: The temporary file is not automatically cleaned up.
+        // A robust solution would involve tracking and cleaning up these files,
+        // for example, on app quit or through a periodic cleanup task.
+
+        return { success: true, path: tempFilePath };
+    } catch (error) {
+        console.error('Failed to open native PDF preview:', error);
+        return { success: false, error: (error as Error).message };
+    }
 });
 
 // IPC handler for fetching Gmail attachment content
