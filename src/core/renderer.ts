@@ -23,13 +23,59 @@ console.log('=== IMPORTS COMPLETED ===');
 console.log('All modules imported successfully');
 
 // Test Zustand stores
-console.log('=== TESTING ZUSTAND STORES ===');
+console.log('=== TESTING ENHANCED ZUSTAND STORES ===');
 console.log('Auth Store State:', useAuthStore.getState());
 console.log('Email Store State:', useEmailStore.getState());
 console.log('UI Store State:', useUIStore.getState());
 console.log('Search Store State:', useSearchStore.getState());
 console.log('Settings Store State:', useSettingsStore.getState());
-console.log('=== ZUSTAND STORES TESTED ===');
+
+// Test new features
+console.log('=== TESTING NEW FEATURES ===');
+
+// Test platform storage
+import { storageUtils } from '../stores/middleware/storage.js';
+console.log('Storage available:', storageUtils.isAvailable());
+console.log('Storage size:', storageUtils.getSize(), 'bytes');
+
+// Test selectors
+import { 
+  selectUnreadCount, 
+  selectTheme, 
+  selectIsAuthenticated,
+  selectEmailCount,
+  selectAppState 
+} from '../stores/selectors.js';
+
+const authState = useAuthStore.getState();
+const emailState = useEmailStore.getState();
+const uiState = useUIStore.getState();
+
+console.log('Selector tests:');
+console.log('- Unread count:', selectUnreadCount(emailState));
+console.log('- Theme:', selectTheme(uiState));
+console.log('- Is authenticated:', selectIsAuthenticated(authState));
+console.log('- Email count:', selectEmailCount(emailState));
+console.log('- App state:', selectAppState(authState, emailState, uiState));
+
+// Test validation
+console.log('=== TESTING VALIDATION ===');
+const settingsValidation = useSettingsStore.getState().validateSettings();
+console.log('Settings validation:', settingsValidation);
+
+const authValidation = useAuthStore.getState().validateToken();
+console.log('Auth token validation:', authValidation);
+
+// Test new email store features
+console.log('=== TESTING EMAIL STORE FEATURES ===');
+console.log('Email store unread count:', useEmailStore.getState().getUnreadCount());
+console.log('Email store last updated:', useEmailStore.getState().lastUpdated);
+
+// Test UI store features
+console.log('=== TESTING UI STORE FEATURES ===');
+console.log('UI store sidebar collapsed:', useUIStore.getState().sidebarCollapsed);
+
+console.log('=== ENHANCED ZUSTAND STORES TESTED ===');
 
 // Basic DOM availability check
 console.log('Settings button exists:', !!document.getElementById('settings-btn'));
