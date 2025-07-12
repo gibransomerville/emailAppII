@@ -54,7 +54,8 @@
     "mailparser": "^3.6.5",
     "nodemailer": "^6.9.7",
     "pdfjs-dist": "^4.8.69",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "zustand": "^4.4.7"
   },
   "overrides": {
     "semver": "^7.5.4"

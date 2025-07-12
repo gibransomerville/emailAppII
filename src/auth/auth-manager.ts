@@ -8,6 +8,7 @@
 import { UIThemeManager } from '../ui/ui-theme-manager.js';
 import { EventManager } from '../managers/event-manager.js';
 import { IMAPEmailManager } from '../email/imap-email-manager.js';
+import { useAuthStore } from '../stores/authStore.js';
 import type { IpcRenderer } from 'electron';
 
 // Get ipcRenderer from window
@@ -50,7 +51,6 @@ interface GoogleAuthValidationResult {
 export class AuthManager {
     private static uiThemeManager: UIThemeManager | null = null;
     private static imapEmailManager: IMAPEmailManager | null = null;
-    private static currentToken: GoogleOAuthCredentials | null = null;
 
     /**
      * Initialize the AuthManager with required dependencies
@@ -78,24 +78,27 @@ export class AuthManager {
      * @returns True if token is valid
      */
     static async refreshTokenIfNeeded(forceRefresh: boolean = false): Promise<boolean> {
-        if (!this.currentToken) {
+        const authStore = useAuthStore.getState();
+        const currentToken = authStore.token;
+        
+        if (!currentToken) {
             console.log('AuthManager: No current token available');
             return false;
         }
 
         try {
             // Check if token is expired or will expire soon (within 5 minutes)
-            const expiryDate = this.currentToken.expiry_date;
+            const expiryDate = currentToken.expiry_date;
             const now = Date.now();
             const fiveMinutes = 5 * 60 * 1000;
 
             if (forceRefresh || (expiryDate && now >= (expiryDate - fiveMinutes))) {
                 console.log('AuthManager: Refreshing access token via IPC...');
                 
-                const result = await ipcRenderer.invoke('refresh-google-token', this.currentToken);
+                const result = await ipcRenderer.invoke('refresh-google-token', currentToken);
                 
                 if (result.success && result.token) {
-                    this.currentToken = result.token;
+                    useAuthStore.getState().updateToken(result.token);
                     console.log('AuthManager: Token refreshed successfully');
                     return true;
                 } else {
@@ -217,7 +220,7 @@ export class AuthManager {
                 
                 // Store the token and set credentials
                 await this.saveGoogleToken(result.token);
-                this.currentToken = result.token;
+                useAuthStore.getState().login(result.token);
                 
                 // Set Google auth in IMAP manager if available
                 if (this.imapEmailManager) {
@@ -301,7 +304,7 @@ export class AuthManager {
         try {
             const result: TokenLoadResult = await ipcRenderer.invoke('load-google-token');
             if (result.success && result.token) {
-                this.currentToken = result.token;
+                useAuthStore.getState().login(result.token);
                 console.log('Stored Google token loaded');
                 return true;
             }
@@ -321,7 +324,7 @@ export class AuthManager {
         try {
             const result: TokenSaveResult = await ipcRenderer.invoke('save-google-token', token);
             if (result.success) {
-                this.currentToken = token;
+                useAuthStore.getState().updateToken(token);
                 console.log('Google token saved successfully');
                 return true;
             }
@@ -337,11 +340,12 @@ export class AuthManager {
      * @returns True if token has required permissions
      */
     static async validateGoogleTokenScopes(): Promise<boolean> {
-        if (!this.currentToken) return false;
+        const currentToken = useAuthStore.getState().token;
+        if (!currentToken) return false;
         
         try {
             // Use IPC to validate token in main process
-            const result: GoogleAuthValidationResult = await ipcRenderer.invoke('validate-google-token', this.currentToken);
+            const result: GoogleAuthValidationResult = await ipcRenderer.invoke('validate-google-token', currentToken);
             return result.success && result.valid === true;
         } catch (error: any) {
             console.warn('Token validation failed:', error);
@@ -354,7 +358,7 @@ export class AuthManager {
      */
     static async clearAuthData(): Promise<void> {
         try {
-            this.currentToken = null;
+            useAuthStore.getState().logout();
             await ipcRenderer.invoke('clear-google-token');
             console.log('Authentication data cleared');
         } catch (error) {
@@ -367,7 +371,7 @@ export class AuthManager {
      * @returns True if authenticated
      */
     static isAuthenticated(): boolean {
-        return !!this.currentToken;
+        return useAuthStore.getState().isAuthenticated;
     }
 
     /**
@@ -375,12 +379,14 @@ export class AuthManager {
      * @returns Authentication status object
      */
     static getAuthStatus(): AuthStatus {
+        const authStore = useAuthStore.getState();
+        const currentToken = authStore.token;
         return {
-            isAuthenticated: this.isAuthenticated(),
-            hasStoredToken: !!this.currentToken,
-            tokenExpiry: this.currentToken?.expiry_date || null,
-            isTokenExpired: this.currentToken?.expiry_date ? 
-                Date.now() >= (this.currentToken.expiry_date - 60000) : false
+            isAuthenticated: authStore.isAuthenticated,
+            hasStoredToken: !!currentToken,
+            tokenExpiry: currentToken?.expiry_date || null,
+            isTokenExpired: currentToken?.expiry_date ? 
+                Date.now() >= (currentToken.expiry_date - 60000) : false
         };
     }
 
@@ -389,7 +395,7 @@ export class AuthManager {
      * @returns Current Google OAuth token
      */
     static getCurrentToken(): GoogleOAuthCredentials | null {
-        return this.currentToken;
+        return useAuthStore.getState().token;
     }
 }
 

@@ -17,9 +17,19 @@ import { EmailRenderer } from '../email/email-renderer.js';
 import { EmailFilterManager } from '../email/email-filter-manager.js';
 import { MarketingEmailDetector } from '../email/marketing-email-detector.js';
 import { AttachmentHandler, getAttachmentManager } from '../utils/attachment-handler.js';
+import { useAuthStore, useEmailStore, useUIStore, useSearchStore, useSettingsStore } from '../stores/index.js';
 
 console.log('=== IMPORTS COMPLETED ===');
 console.log('All modules imported successfully');
+
+// Test Zustand stores
+console.log('=== TESTING ZUSTAND STORES ===');
+console.log('Auth Store State:', useAuthStore.getState());
+console.log('Email Store State:', useEmailStore.getState());
+console.log('UI Store State:', useUIStore.getState());
+console.log('Search Store State:', useSearchStore.getState());
+console.log('Settings Store State:', useSettingsStore.getState());
+console.log('=== ZUSTAND STORES TESTED ===');
 
 // Basic DOM availability check
 console.log('Settings button exists:', !!document.getElementById('settings-btn'));

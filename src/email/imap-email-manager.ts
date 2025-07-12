@@ -18,6 +18,7 @@ import { UIThemeManager } from '../ui/ui-theme-manager.js';
 import { EventManager } from '../managers/event-manager.js';
 import { EmailManager } from '../email/email-manager.js';
 import { getSearchManager } from '../managers/search-manager.js';
+import { useEmailStore } from '../stores/emailStore.js';
 import type { Email, EmailConversation, EmailAddress } from '../../types/email';
 
 // Get ipcRenderer for Gmail API communication
@@ -127,8 +128,6 @@ export interface ConversationGroup {
  * IMAP Email Manager - Centralized email loading and management
  */
 export class IMAPEmailManager {
-  private emails: Email[] = [];
-  private conversations: Record<string, EmailConversation> = {};
   private googleAuth: any = null;
   private emailConfig: any = null;
   private conversationSelectCallback: ((id: string) => void) | null = null;
@@ -194,7 +193,7 @@ export class IMAPEmailManager {
    * @returns Current emails array
    */
   getEmails(): Email[] {
-    return this.emails;
+    return useEmailStore.getState().emails;
   }
 
   /**
@@ -202,7 +201,7 @@ export class IMAPEmailManager {
    * @returns Current conversations object
    */
   getConversations(): Record<string, EmailConversation> {
-    return this.conversations;
+    return useEmailStore.getState().conversations;
   }
 
   /**
@@ -261,7 +260,7 @@ export class IMAPEmailManager {
 
       // 3. Process HTML/Text for each enhanced email
       const htmlEngine = (window as any).EmailHtmlEngine || (globalThis as any).EmailHtmlEngine;
-      this.emails = enhancedEmails.map((email: any) => {
+      const processedEmails = enhancedEmails.map((email: any) => {
         if (htmlEngine && typeof htmlEngine.processEmailHtml === 'function') {
           const processed = htmlEngine.processEmailHtml(email);
           // Store processed HTML for direct use in UI
@@ -269,23 +268,27 @@ export class IMAPEmailManager {
         }
         return email;
       });
+      
       // 4. Group emails into conversations
       console.log('Grouping emails into conversations...');
-      this.conversations = this.basicEmailGrouping(this.emails);
-      // 5. Sync state immediately to prevent race conditions
-      this.syncGlobalState();
+      const conversations = this.basicEmailGrouping(processedEmails);
+      
+      // 5. Update Zustand store
+      useEmailStore.getState().setEmails(processedEmails);
+      useEmailStore.getState().setConversations(conversations);
+      
       // 6. Build search index using the singleton search manager
       const searchManager = getSearchManager();
       if (searchManager && searchManager.buildSearchIndex) {
-        searchManager.buildSearchIndex(this.emails);
+        searchManager.buildSearchIndex(processedEmails);
       }
       // 7. Initialize IMAP search engine if using IMAP
       if (this.emailConfig && !this.googleAuth && (window as any).IMAPSearchEngine) {
         (window as any).imapSearchEngine = new (window as any).IMAPSearchEngine(this.emailConfig);
       }
       // 8. Log parsing statistics
-      if (this.emails.length > 0) {
-        this.emailManager.logEmailParsingStats(this.emails);
+      if (processedEmails.length > 0) {
+        this.emailManager.logEmailParsingStats(processedEmails);
       }
       // 9. Debug email rendering issues
       if (typeof (window as any).debugEmailRenderingIssues === 'function') {
@@ -301,16 +304,16 @@ export class IMAPEmailManager {
       }
       const loadingTime = Date.now() - startTime;
       this.uiThemeManager.showNotification(
-        `Loaded ${this.emails.length} messages in ${Object.keys(this.conversations).length} conversations`,
+        `Loaded ${processedEmails.length} messages in ${Object.keys(conversations).length} conversations`,
         'success'
       );
       return {
         success: true,
-        emails: this.emails,
-        conversations: this.conversations,
+        emails: processedEmails,
+        conversations: conversations,
         stats: {
-          totalEmails: this.emails.length,
-          totalConversations: Object.keys(this.conversations).length,
+          totalEmails: processedEmails.length,
+          totalConversations: Object.keys(conversations).length,
           loadingTime
         }
       };
@@ -427,9 +430,10 @@ export class IMAPEmailManager {
       return;
     }
 
+    const conversations = useEmailStore.getState().conversations;
     conversationsList.innerHTML = '';
 
-    if (Object.keys(this.conversations).length === 0) {
+    if (Object.keys(conversations).length === 0) {
       conversationsList.innerHTML = `
         <div class="text-center" style="padding: 20px; color: var(--text-secondary);">
           <p>No conversations found</p>
@@ -439,15 +443,15 @@ export class IMAPEmailManager {
     }
 
     // Sort conversations by date of latest email
-    const sortedConversations = Object.values(this.conversations)
-      .filter(conversation => conversation.emails && conversation.emails.length > 0)
-      .sort((a, b) => {
-        const aLatest = Math.max(...a.emails.map(e => new Date(e.date).getTime()));
-        const bLatest = Math.max(...b.emails.map(e => new Date(e.date).getTime()));
+    const sortedConversations = Object.values(conversations)
+      .filter((conversation: EmailConversation) => conversation.emails && conversation.emails.length > 0)
+      .sort((a: EmailConversation, b: EmailConversation) => {
+        const aLatest = Math.max(...a.emails.map((e: Email) => new Date(e.date).getTime()));
+        const bLatest = Math.max(...b.emails.map((e: Email) => new Date(e.date).getTime()));
         return bLatest - aLatest;
       });
 
-    sortedConversations.forEach(conversation => {
+    sortedConversations.forEach((conversation: EmailConversation) => {
       const element = this.createConversationElement(conversation);
       conversationsList.appendChild(element);
     });
@@ -605,20 +609,22 @@ export class IMAPEmailManager {
   private syncGlobalState(): void {
     console.log('IMAPEmailManager: Syncing state to global variables for compatibility');
     
+    const emailStore = useEmailStore.getState();
+    
     // Immediate synchronous assignment
-    (window as any).emails = this.emails;
-    (window as any).conversations = this.conversations;
+    (window as any).emails = emailStore.emails;
+    (window as any).conversations = emailStore.conversations;
     
     // Notify other modules that state is ready
     window.dispatchEvent(new CustomEvent('emailsLoaded', {
       detail: {
-        emails: this.emails,
-        conversations: this.conversations,
+        emails: emailStore.emails,
+        conversations: emailStore.conversations,
         timestamp: Date.now()
       }
     }));
     
-    console.log(`IMAPEmailManager: Synced ${this.emails.length} emails and ${Object.keys(this.conversations).length} conversations to global state`);
+    console.log(`IMAPEmailManager: Synced ${emailStore.emails.length} emails and ${Object.keys(emailStore.conversations).length} conversations to global state`);
   }
 
   // waitForGlobalState method removed - functionality moved to email-actions.ts

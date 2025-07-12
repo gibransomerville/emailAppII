@@ -3,6 +3,8 @@
  * Handles all UI state management, theme switching, modal controls, loading states, and notifications
  */
 
+import { useUIStore } from '../stores/uiStore.js';
+
 export type Theme = 'light' | 'dark';
 
 interface DOMElements {
@@ -23,7 +25,6 @@ interface DOMElements {
 
 export class UIThemeManager {
     private domElements: DOMElements;
-    private theme: string = 'light';
     private initialized: boolean = false;
 
     constructor() {
@@ -36,13 +37,7 @@ export class UIThemeManager {
             return;
         }
 
-        // Load saved theme
-        const savedTheme = localStorage.getItem('theme');
-        if (savedTheme) {
-            this.theme = savedTheme;
-        }
-
-        // Apply theme
+        // Apply theme from store
         this.applyTheme();
 
         // Initialize UI elements
@@ -54,8 +49,8 @@ export class UIThemeManager {
     }
 
     private applyTheme(): void {
-        document.documentElement.setAttribute('data-theme', this.theme);
-        localStorage.setItem('theme', this.theme);
+        const theme = useUIStore.getState().theme;
+        document.documentElement.setAttribute('data-theme', theme);
     }
 
     private initializeModals(): void {
@@ -287,12 +282,12 @@ export class UIThemeManager {
     }
 
     toggleTheme(): void {
-        this.theme = this.theme === 'light' ? 'dark' : 'light';
+        useUIStore.getState().toggleTheme();
         this.applyTheme();
     }
 
     getCurrentTheme(): Theme {
-        return this.theme as Theme;
+        return useUIStore.getState().theme;
     }
 
     isInitialized(): boolean {

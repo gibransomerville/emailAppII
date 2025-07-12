@@ -44,7 +44,8 @@ export default defineConfig({
       './dist/email/email-composer.js',
       './dist/ui/ui-theme-manager.js',
       './dist/ui/ui-components.js',
-      'pdfjs-dist'
+      'pdfjs-dist',
+      'zustand'
     ]
   }
 }); 
