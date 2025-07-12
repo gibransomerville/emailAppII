@@ -22,7 +22,10 @@
     "lint:ts": "tsc --noEmit --skipLibCheck",
     "prestart": "npm run build:ts",
     "predev": "npm run build:ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:ui": "vitest --ui"
   },
   "keywords": [
     "electron",
@@ -33,19 +36,23 @@
   "author": "Your Name",
   "license": "MIT",
   "devDependencies": {
+    "@types/crypto-js": "^4.2.2",
     "@types/dompurify": "^3.2.0",
     "@types/imap": "^0.8.42",
     "@types/mailparser": "^3.4.6",
     "@types/node": "^24.0.3",
     "@types/nodemailer": "^6.4.17",
     "@types/uuid": "^10.0.0",
+    "crypto-js": "^4.2.0",
     "electron": "^28.0.0",
     "electron-builder": "^24.6.4",
     "electronmon": "^2.0.3",
     "immer": "^10.1.1",
+    "jsdom": "^26.1.0",
     "rimraf": "^6.0.1",
     "typescript": "^5.8.3",
-    "vite": "^7.0.0"
+    "vite": "^7.0.0",
+    "vitest": "^3.2.4"
   },
   "dependencies": {
     "@microsoft/microsoft-graph-client": "^3.0.4",

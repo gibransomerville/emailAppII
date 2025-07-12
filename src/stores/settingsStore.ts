@@ -1,6 +1,7 @@
 // src/stores/settingsStore.ts
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, devtools } from 'zustand/middleware';
+import { immer } from 'zustand/middleware/immer';
 import { platformStorage } from './middleware/storage.js';
 
 export interface EmailSettings {
@@ -31,9 +32,9 @@ interface SettingsState {
   email: EmailSettings;
   ui: UISettings;
   security: SecuritySettings;
-  updateEmailSettings: (settings: Partial<EmailSettings>) => void;
+  updateEmailSettings: (settings: Partial<EmailSettings>) => Promise<void>;
   updateUISettings: (settings: Partial<UISettings>) => void;
-  updateSecuritySettings: (settings: Partial<SecuritySettings>) => void;
+  updateSecuritySettings: (settings: Partial<SecuritySettings>) => Promise<void>;
   resetToDefaults: () => void;
   validateSettings: () => { isValid: boolean; errors: string[] };
 }
@@ -91,82 +92,93 @@ const validateSecuritySettings = (settings: SecuritySettings): string[] => {
   return errors;
 };
 
+// Development environment detection
+const isDevelopment = process.env.NODE_ENV === 'development';
+
 export const useSettingsStore = create<SettingsState>()(
-  persist(
-    (set, get) => ({
-      email: defaultEmailSettings,
-      ui: defaultUISettings,
-      security: defaultSecuritySettings,
-      
-      updateEmailSettings: (settings) => {
-        const currentSettings = get().email;
-        const newSettings = { ...currentSettings, ...settings };
-        const errors = validateEmailSettings(newSettings);
-        
-        if (errors.length > 0) {
-          console.warn('Email settings validation errors:', errors);
-          return;
+  devtools(
+    immer(
+      persist(
+        (set, get) => ({
+          email: defaultEmailSettings,
+          ui: defaultUISettings,
+          security: defaultSecuritySettings,
+          
+          updateEmailSettings: async (settings) => {
+            const currentSettings = get().email;
+            const newSettings = { ...currentSettings, ...settings };
+            const errors = validateEmailSettings(newSettings);
+            
+            if (errors.length > 0) {
+              console.warn('Email settings validation errors:', errors);
+              throw new Error(`Email settings validation failed: ${errors.join(', ')}`);
+            }
+            
+            set((state) => {
+              Object.assign(state.email, settings);
+            });
+          },
+          
+          updateUISettings: (settings) => set((state) => {
+            Object.assign(state.ui, settings);
+          }),
+          
+          updateSecuritySettings: async (settings) => {
+            const currentSettings = get().security;
+            const newSettings = { ...currentSettings, ...settings };
+            const errors = validateSecuritySettings(newSettings);
+            
+            if (errors.length > 0) {
+              console.warn('Security settings validation errors:', errors);
+              throw new Error(`Security settings validation failed: ${errors.join(', ')}`);
+            }
+            
+            set((state) => {
+              Object.assign(state.security, settings);
+            });
+          },
+          
+          resetToDefaults: () => set((state) => {
+            state.email = { ...defaultEmailSettings };
+            state.ui = { ...defaultUISettings };
+            state.security = { ...defaultSecuritySettings };
+          }),
+          
+          validateSettings: () => {
+            const state = get();
+            const emailErrors = validateEmailSettings(state.email);
+            const securityErrors = validateSecuritySettings(state.security);
+            const allErrors = [...emailErrors, ...securityErrors];
+            
+            return {
+              isValid: allErrors.length === 0,
+              errors: allErrors
+            };
+          },
+        }),
+        {
+          name: 'settings-storage',
+          storage: platformStorage,
+          partialize: (state) => ({
+            email: state.email,
+            ui: state.ui,
+            security: state.security,
+          }),
+          onRehydrateStorage: () => (state) => {
+            if (state) {
+              const validation = state.validateSettings();
+              if (!validation.isValid) {
+                console.warn('Invalid settings detected, resetting to defaults:', validation.errors);
+                state.resetToDefaults();
+              }
+            }
+          },
         }
-        
-        set((state) => ({
-          email: { ...state.email, ...settings }
-        }));
-      },
-      
-      updateUISettings: (settings) => set((state) => ({
-        ui: { ...state.ui, ...settings }
-      })),
-      
-      updateSecuritySettings: (settings) => {
-        const currentSettings = get().security;
-        const newSettings = { ...currentSettings, ...settings };
-        const errors = validateSecuritySettings(newSettings);
-        
-        if (errors.length > 0) {
-          console.warn('Security settings validation errors:', errors);
-          return;
-        }
-        
-        set((state) => ({
-          security: { ...state.security, ...settings }
-        }));
-      },
-      
-      resetToDefaults: () => set({
-        email: defaultEmailSettings,
-        ui: defaultUISettings,
-        security: defaultSecuritySettings,
-      }),
-      
-      validateSettings: () => {
-        const state = get();
-        const emailErrors = validateEmailSettings(state.email);
-        const securityErrors = validateSecuritySettings(state.security);
-        const allErrors = [...emailErrors, ...securityErrors];
-        
-        return {
-          isValid: allErrors.length === 0,
-          errors: allErrors
-        };
-      },
-    }),
-    {
-      name: 'settings-storage',
-      storage: platformStorage,
-      partialize: (state) => ({
-        email: state.email,
-        ui: state.ui,
-        security: state.security,
-      }),
-      onRehydrateStorage: () => (state) => {
-        if (state) {
-          const validation = state.validateSettings();
-          if (!validation.isValid) {
-            console.warn('Invalid settings detected, resetting to defaults:', validation.errors);
-            state.resetToDefaults();
-          }
-        }
-      },
+      )
+    ),
+    { 
+      name: 'SettingsStore', 
+      enabled: isDevelopment 
     }
   )
 ); 

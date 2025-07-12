@@ -1,6 +1,7 @@
 // src/stores/uiStore.ts
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, devtools } from 'zustand/middleware';
+import { immer } from 'zustand/middleware/immer';
 import { platformStorage } from './middleware/storage.js';
 
 interface UIState {
@@ -31,65 +32,80 @@ interface UIState {
 
 const MAX_NOTIFICATIONS = 10; // Limit notifications for performance
 
+// Development environment detection
+const isDevelopment = process.env.NODE_ENV === 'development';
+
 export const useUIStore = create<UIState>()(
-  persist(
-    (set, get) => ({
-      theme: 'light',
-      modals: { compose: false, settings: false, oauthLoading: false },
-      notifications: [],
-      loading: false,
-      sidebarCollapsed: false,
-      
-      toggleTheme: () => set((state) => ({ 
-        theme: state.theme === 'light' ? 'dark' : 'light' 
-      })),
-      
-      showModal: (type) => set((state) => ({ 
-        modals: { ...state.modals, [type]: true } 
-      })),
-      
-      hideModal: (type) => set((state) => ({ 
-        modals: { ...state.modals, [type]: false } 
-      })),
-      
-      addNotification: (message, type) => set((state) => {
-        const newNotification = { 
-          id: Date.now().toString(), 
-          message, 
-          type, 
-          timestamp: Date.now() 
-        };
-        
-        // Limit notifications to prevent memory issues
-        const updatedNotifications = [
-          newNotification,
-          ...state.notifications.slice(0, MAX_NOTIFICATIONS - 1)
-        ];
-        
-        return { notifications: updatedNotifications };
-      }),
-      
-      removeNotification: (id) => set((state) => ({
-        notifications: state.notifications.filter(n => n.id !== id)
-      })),
-      
-      clearNotifications: () => set({ notifications: [] }),
-      
-      setLoading: (loading) => set({ loading }),
-      
-      toggleSidebar: () => set((state) => ({ 
-        sidebarCollapsed: !state.sidebarCollapsed 
-      })),
-      
-      setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
-    }),
+  devtools(
+    immer(
+      persist(
+        (set, get) => ({
+          theme: 'light',
+          modals: { compose: false, settings: false, oauthLoading: false },
+          notifications: [],
+          loading: false,
+          sidebarCollapsed: false,
+          
+          toggleTheme: () => set((state) => {
+            state.theme = state.theme === 'light' ? 'dark' : 'light';
+          }),
+          
+          showModal: (type) => set((state) => {
+            state.modals[type] = true;
+          }),
+          
+          hideModal: (type) => set((state) => {
+            state.modals[type] = false;
+          }),
+          
+          addNotification: (message, type) => set((state) => {
+            const newNotification = { 
+              id: Date.now().toString(), 
+              message, 
+              type, 
+              timestamp: Date.now() 
+            };
+            
+            // Limit notifications to prevent memory issues
+            state.notifications.unshift(newNotification);
+            if (state.notifications.length > MAX_NOTIFICATIONS) {
+              state.notifications = state.notifications.slice(0, MAX_NOTIFICATIONS);
+            }
+          }),
+          
+          removeNotification: (id) => set((state) => {
+            state.notifications = state.notifications.filter(n => n.id !== id);
+          }),
+          
+          clearNotifications: () => set((state) => {
+            state.notifications = [];
+          }),
+          
+          setLoading: (loading) => set((state) => {
+            state.loading = loading;
+          }),
+          
+          toggleSidebar: () => set((state) => {
+            state.sidebarCollapsed = !state.sidebarCollapsed;
+          }),
+          
+          setSidebarCollapsed: (collapsed) => set((state) => {
+            state.sidebarCollapsed = collapsed;
+          }),
+        }),
+        { 
+          name: 'ui-storage', 
+          storage: platformStorage,
+          partialize: (state) => ({ 
+            theme: state.theme,
+            sidebarCollapsed: state.sidebarCollapsed 
+          }) // Persist theme and sidebar state only
+        }
+      )
+    ),
     { 
-      name: 'ui-storage', 
-      storage: platformStorage,
-      partialize: (state) => ({ 
-        theme: state.theme,
-        sidebarCollapsed: state.sidebarCollapsed 
-      }) // Persist theme and sidebar state only
+      name: 'UIStore', 
+      enabled: isDevelopment 
     }
   )
 ); 
